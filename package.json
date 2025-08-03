@@ -1,6 +1,6 @@
 {
   "name": "vega",
-  "version": "3.2.1",
+  "version": "3.2.3",
   "private": true,
   "scripts": {
     "android": "expo run:android",
@@ -25,6 +25,8 @@
     "@gorhom/bottom-sheet": "^4.6.4",
     "@notifee/react-native": "^9.1.8",
     "@react-native-community/blur": "^4.4.1",
+    "@react-native-firebase/app": "^22.4.0",
+    "@react-native-firebase/messaging": "^22.4.0",
     "@react-navigation/bottom-tabs": "^7.4.2",
     "@react-navigation/native": "^7.1.14",
     "@react-navigation/native-stack": "^7.3.21",
@@ -50,6 +52,7 @@
     "nativewind": "^2.0.11",
     "react": "18.3.1",
     "react-native": "0.76.9",
+    "react-native-blob-util": "^0.22.2",
     "react-native-bootsplash": "^6.3.2",
     "react-native-edge-to-edge": "^1.6.2",
     "react-native-element-dropdown": "^2.12.0",

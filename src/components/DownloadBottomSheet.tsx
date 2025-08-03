@@ -115,10 +115,11 @@ const DownloadBottomSheet = ({
                       />
                     ))
                   : activeTab === 1
-                  ? data.map(item => (
+                  ? data.map((item, index) => (
+                      // FIX: The key is updated to include the index to ensure uniqueness.
                       <TouchableOpacity
                         className="p-2 bg-white/30 rounded-md my-1"
-                        key={item.link}
+                        key={`${item.link}-${index}`}
                         onLongPress={() => {
                           if (settingsStorage.isHapticFeedbackEnabled()) {
                             RNReactNativeHapticFeedback.trigger('effectTick', {
@@ -139,10 +140,11 @@ const DownloadBottomSheet = ({
                   : subtitle.length > 0
                   ? subtitle.map(
                       subs =>
-                        subs?.map(item => (
+                        subs?.map((item, index) => (
+                          // FIX: The key is updated to include the index to ensure uniqueness.
                           <TouchableOpacity
                             className="p-2 bg-white/30 rounded-md my-1"
-                            key={item.uri}
+                            key={`${item.uri}-${index}`}
                             onLongPress={() => {
                               if (settingsStorage.isHapticFeedbackEnabled()) {
                                 RNReactNativeHapticFeedback.trigger(
