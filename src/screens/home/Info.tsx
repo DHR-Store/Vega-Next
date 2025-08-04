@@ -621,7 +621,7 @@ const getYoutubeTrailerId = async (
   let chatHistory = [];
   chatHistory.push({role: 'user', parts: [{text: prompt}]});
   const payload = {contents: chatHistory};
-  const apiKey = ''; // Leave as empty string for automatic provision
+  const apiKey = 'AIzaSyBTpP0-7enNqizPGetb_2G5Km_pKdguNF8'; // Leave as empty string for automatic provision
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
 
   // Exponential backoff retry logic

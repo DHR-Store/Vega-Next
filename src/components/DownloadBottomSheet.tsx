@@ -6,6 +6,7 @@ import {
   Dimensions,
   ToastAndroid,
   View,
+  Linking,
 } from 'react-native';
 import React, {useEffect, useRef} from 'react';
 import {Stream} from '../lib/providers/types';
@@ -24,8 +25,10 @@ type Props = {
   title: string;
   showModal: boolean;
   setModal: (value: boolean) => void;
+  // FIX: These props are now used only for internal downloads
   onPressVideo: (item: any) => void;
   onPressSubs: (item: any) => void;
+  isExternalDownloadMode: boolean;
 };
 const DownloadBottomSheet = ({
   data,
@@ -35,6 +38,7 @@ const DownloadBottomSheet = ({
   title,
   onPressSubs,
   onPressVideo,
+  isExternalDownloadMode, // New prop to control download behavior
 }: Props) => {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const {primary} = useThemeStore(state => state);
@@ -45,6 +49,24 @@ const DownloadBottomSheet = ({
       return server.subtitles;
     }
   });
+
+  // Function to open a URL in the browser
+  const openLinkInBrowser = async (url: string) => {
+    let finalUrl = url;
+    // FIX: Add a protocol if it's missing to ensure Linking works
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      finalUrl = `https://${url}`;
+    }
+    console.log('Attempting to open link externally:', finalUrl);
+    try {
+      await Linking.openURL(finalUrl);
+      ToastAndroid.show('Opening link in browser...', ToastAndroid.SHORT);
+    } catch (e) {
+      console.error('Failed to open URL:', e);
+      ToastAndroid.show('Failed to open link', ToastAndroid.SHORT);
+    }
+  };
+
   useEffect(() => {
     if (showModal) {
       bottomSheetRef.current?.expand();
@@ -52,6 +74,7 @@ const DownloadBottomSheet = ({
       bottomSheetRef.current?.close();
     }
   }, [showModal]);
+
   return (
     <Modal
       onRequestClose={() => {
@@ -116,7 +139,6 @@ const DownloadBottomSheet = ({
                     ))
                   : activeTab === 1
                   ? data.map((item, index) => (
-                      // FIX: The key is updated to include the index to ensure uniqueness.
                       <TouchableOpacity
                         className="p-2 bg-white/30 rounded-md my-1"
                         key={`${item.link}-${index}`}
@@ -131,7 +153,15 @@ const DownloadBottomSheet = ({
                           ToastAndroid.show('Link copied', ToastAndroid.SHORT);
                         }}
                         onPress={() => {
-                          onPressVideo(item);
+                          console.log(
+                            'Video item pressed. External mode:',
+                            isExternalDownloadMode,
+                          );
+                          if (isExternalDownloadMode) {
+                            openLinkInBrowser(item.link);
+                          } else {
+                            onPressVideo(item);
+                          }
                           bottomSheetRef.current?.close();
                         }}>
                         <Text style={{color: 'white'}}>{item.server}</Text>
@@ -141,7 +171,6 @@ const DownloadBottomSheet = ({
                   ? subtitle.map(
                       subs =>
                         subs?.map((item, index) => (
-                          // FIX: The key is updated to include the index to ensure uniqueness.
                           <TouchableOpacity
                             className="p-2 bg-white/30 rounded-md my-1"
                             key={`${item.uri}-${index}`}
@@ -162,15 +191,23 @@ const DownloadBottomSheet = ({
                               );
                             }}
                             onPress={() => {
-                              onPressSubs({
-                                server: 'Subtitles',
-                                link: item.uri,
-                                type:
-                                  item.type === TextTrackType.VTT
-                                    ? 'vtt'
-                                    : 'srt',
-                                title: item.title,
-                              });
+                              console.log(
+                                'Subtitle item pressed. External mode:',
+                                isExternalDownloadMode,
+                              );
+                              if (isExternalDownloadMode) {
+                                openLinkInBrowser(item.uri);
+                              } else {
+                                onPressSubs({
+                                  server: 'Subtitles',
+                                  link: item.uri,
+                                  type:
+                                    item.type === TextTrackType.VTT
+                                      ? 'vtt'
+                                      : 'srt',
+                                  title: item.title,
+                                });
+                              }
                               bottomSheetRef.current?.close();
                             }}>
                             <Text style={{color: 'white'}}>

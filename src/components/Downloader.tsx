@@ -1,5 +1,12 @@
 import React, {useEffect, useLayoutEffect, useState} from 'react';
-import {View, Text, TouchableOpacity, Modal, Pressable} from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Modal,
+  Pressable,
+  Linking,
+} from 'react-native';
 import {ifExists} from '../lib/file/ifExists';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Octicons from '@expo/vector-icons/Octicons';
@@ -7,10 +14,8 @@ import {Stream} from '../lib/providers/types';
 import {MotiView} from 'moti';
 import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useContentStore from '../lib/zustand/contentStore';
-import * as IntentLauncher from 'expo-intent-launcher';
 import {downloadManager} from '../lib/downloader';
 import {cancelHlsDownload} from '../lib/hlsDownloader2';
-// import {FFmpegKit} from 'ffmpeg-kit-react-native';
 import * as RNFS from '@dr.pogodin/react-native-fs';
 import {downloadFolder} from '../lib/constants';
 import useThemeStore from '../lib/zustand/themeStore';
@@ -38,7 +43,8 @@ const DownloadComponent = ({
   );
   const [deleteModal, setDeleteModal] = useState(false);
   const [downloadModal, setDownloadModal] = useState(false);
-  const [longPressModal, setLongPressModal] = useState(false);
+  // FIX: New state to determine the download mode
+  const [isExternalDownload, setIsExternalDownload] = useState(false);
   const [cancelModal, setCancelModal] = useState(false);
   const [downloadId, setDownloadId] = useState<number | null>(null);
   const [servers, setServers] = useState<Stream[]>([]);
@@ -79,7 +85,7 @@ const DownloadComponent = ({
   // choose server
   useEffect(() => {
     const controller = new AbortController();
-    if (!downloadModal && !longPressModal) {
+    if (!downloadModal) {
       return;
     }
     const getServer = async () => {
@@ -91,12 +97,6 @@ const DownloadComponent = ({
         providerValue: providerValue || provider.value,
       });
       const filteredServers = servers;
-      // .filter(
-      //   server =>
-      //     !manifest[
-      //       providerValue || provider.value
-      //     ].nonDownloadableServer?.includes(server.server),
-      // );
       setServerLoading(false);
       setServers(filteredServers);
     };
@@ -105,19 +105,7 @@ const DownloadComponent = ({
     return () => {
       controller.abort();
     };
-  }, [downloadModal, longPressModal]);
-
-  // on holdPress external downloader
-  const longPressDownload = async (link: string, type?: string) => {
-    try {
-      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: link,
-        type: type || 'video/*',
-      });
-    } catch (error) {
-      console.log(error);
-    }
-  };
+  }, [downloadModal]);
 
   return (
     <>
@@ -135,7 +123,6 @@ const DownloadComponent = ({
             <TouchableOpacity
               onPress={() => {
                 setCancelModal(prev => !prev);
-                console.log('pressed');
               }}>
               <MaterialIcons name="downloading" size={27} color={primary} />
             </TouchableOpacity>
@@ -149,13 +136,12 @@ const DownloadComponent = ({
         ) : (
           <TouchableOpacity
             onPress={() => {
-              if (
-                settingsStorage.getBool('alwaysExternalDownloader') === true
-              ) {
-                setLongPressModal(true);
-              } else {
-                setDownloadModal(true);
-              }
+              const alwaysExternal = settingsStorage.getBool(
+                'alwaysExternalDownloader',
+              );
+              // FIX: Set the external download mode based on the setting
+              setIsExternalDownload(!!alwaysExternal);
+              setDownloadModal(true);
             }}
             onLongPress={() => {
               if (settingsStorage.getBool('hapticFeedback') !== false) {
@@ -164,7 +150,9 @@ const DownloadComponent = ({
                   ignoreAndroidSystemSettings: false,
                 });
               }
-              setLongPressModal(true);
+              // FIX: A long press always sets the mode to external
+              setIsExternalDownload(true);
+              setDownloadModal(true);
             }}
             className="mx-2">
             <Octicons name="download" size={25} color="#c1c4c9" />
@@ -200,13 +188,19 @@ const DownloadComponent = ({
             </View>
           </Modal>
         }
-        {/* download modal */}
+        {/* FIX: Consolidated download modals into a single component */}
         <DownloadBottomSheet
           setModal={setDownloadModal}
           showModal={downloadModal}
           data={servers}
           loading={serverLoading}
-          title="Select Server To Download"
+          // FIX: The title now changes based on the download mode
+          title={
+            isExternalDownload
+              ? 'Select Server to Open'
+              : 'Select Server to Download'
+          }
+          isExternalDownloadMode={isExternalDownload}
           onPressVideo={(server: Stream) => {
             downloadManager({
               title: title,
@@ -233,20 +227,6 @@ const DownloadComponent = ({
             });
           }}
         />
-        {/* long press modal */}
-        <DownloadBottomSheet
-          setModal={setLongPressModal}
-          showModal={longPressModal}
-          data={servers}
-          loading={serverLoading}
-          title="Select Server To Open"
-          onPressVideo={(server: Stream) => {
-            longPressDownload(server.link);
-          }}
-          onPressSubs={(sub: {link: string; type: string; title: string}) => {
-            longPressDownload(sub.link, 'text/vtt');
-          }}
-        />
       </View>
       {cancelModal && downloadId && (
         <Pressable
@@ -260,8 +240,6 @@ const DownloadComponent = ({
               } else {
                 // Regular download cancellation
                 RNFS.stopDownload(downloadId);
-                //FFMPEGKIT CANCEL
-                // FFmpegKit.cancel(downloadId);
               }
               setDownloadActive(false);
 

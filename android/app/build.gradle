@@ -91,8 +91,8 @@ android {
         applicationId 'com.vega'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 144
-        versionName "3.2.1"
+        versionCode 145
+        versionName "3.2.4"
     }
 
     // ADD THIS 'splits' BLOCK HERE for ABI configuration
