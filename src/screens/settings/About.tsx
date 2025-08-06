@@ -1,3 +1,5 @@
+// my-react-native-app/src/screens/About.js
+
 import {
   View,
   Text,
@@ -7,18 +9,17 @@ import {
   Alert,
   Switch,
 } from 'react-native';
-// import pkg from '../../../package.json';
-import React, {useState} from 'react';
-import {Feather} from '@expo/vector-icons';
-import {settingsStorage} from '../../lib/storage';
-import * as RNFS from '@dr.pogodin/react-native-fs';
-import {MaterialCommunityIcons} from '@expo/vector-icons';
-import useThemeStore from '../../lib/zustand/themeStore';
+import React, { useState } from 'react';
+import { Feather } from '@expo/vector-icons';
+import { settingsStorage } from '../../lib/storage'; // Assuming this path is correct
+import * as RNFS from '@dr.pogodin/react-native-fs'; // Corrected import statement
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import useThemeStore from '../../lib/zustand/themeStore'; // Assuming this path is correct
 import * as Application from 'expo-application';
-import {notificationService} from '../../lib/services/Notification';
+import { notificationService } from '../../lib/services/Notification'; // Assuming this path is correct
 
-// download update
-const downloadUpdate = async (url: string, name: string) => {
+// Helper function to download update
+const downloadUpdate = async (url, name) => {
   console.log('downloading', url, name);
   await notificationService.requestPermission();
 
@@ -28,7 +29,7 @@ const downloadUpdate = async (url: string, name: string) => {
         id: 'downloadComplete',
         title: 'Download Completed',
         body: 'Tap to install',
-        data: {name: `${name}`},
+        data: { name: `${name}` },
         actions: [
           {
             title: 'Install',
@@ -40,8 +41,11 @@ const downloadUpdate = async (url: string, name: string) => {
       });
       return;
     }
-  } catch (error) {}
-  const {promise} = RNFS.downloadFile({
+  } catch (error) {
+    console.error("Error checking existing file:", error);
+  }
+
+  const { promise } = RNFS.downloadFile({
     fromUrl: url,
     background: true,
     progressInterval: 1000,
@@ -63,6 +67,7 @@ const downloadUpdate = async (url: string, name: string) => {
       );
     },
   });
+
   promise.then(async res => {
     if (res.statusCode === 200) {
       await notificationService.cancelNotification('updateProgress');
@@ -70,7 +75,7 @@ const downloadUpdate = async (url: string, name: string) => {
         id: 'downloadComplete',
         title: 'Download Complete',
         body: 'Tap to install',
-        data: {name},
+        data: { name },
         actions: [
           {
             title: 'Install',
@@ -80,41 +85,80 @@ const downloadUpdate = async (url: string, name: string) => {
           },
         ],
       });
+    } else {
+      ToastAndroid.show(`Download failed with status: ${res.statusCode}`, ToastAndroid.LONG);
+      console.error("Download failed:", res);
     }
+  }).catch(err => {
+    ToastAndroid.show(`Download error: ${err.message}`, ToastAndroid.LONG);
+    console.error("Download promise error:", err);
   });
 };
 
+// Helper function to compare versions
+function compareVersions(localVersion, remoteVersion) {
+  try {
+    const local = localVersion.split('.').map(Number);
+    const remote = remoteVersion.split('.').map(Number);
+
+    for (let i = 0; i < Math.max(local.length, remote.length); i++) {
+      const localPart = local[i] || 0;
+      const remotePart = remote[i] || 0;
+
+      if (remotePart > localPart) {
+        return true;
+      }
+      if (remotePart < localPart) {
+        return false;
+      }
+    }
+    return false; // Versions are equal
+  } catch (error) {
+    console.error('Invalid version format during comparison:', error);
+    return false;
+  }
+}
+
 // handle check for update
 export const checkForUpdate = async (
-  setUpdateLoading: React.Dispatch<React.SetStateAction<boolean>>,
-  autoDownload: boolean,
-  showToast: boolean = true,
+  setUpdateLoading,
+  autoDownload,
+  showToast = true,
 ) => {
   setUpdateLoading(true);
   try {
-    const res = await fetch(
-      'https://api.github.com/repos/Zenda-Cross/vega-app/releases/latest',
-    );
+    // --- IMPORTANT: VERCEL_API_DOMAIN should ONLY be the domain name ---
+    const VERCEL_API_DOMAIN = 'my-update-server-ij9t.vercel.app'; // Corrected: Removed 'https://' and trailing slash
+
+    const apiUrl = `https://${VERCEL_API_DOMAIN}/api/latest-release`; // Now correctly forms the URL
+    console.log('Attempting to fetch from:', apiUrl); // Log the URL being used
+
+    const res = await fetch(apiUrl);
     const data = await res.json();
+
     const localVersion = Application.nativeApplicationVersion;
-    const remoteVersion = Number(
-      data.tag_name.replace('v', '')?.split('.').join(''),
-    );
-    if (compareVersions(localVersion || '', data.tag_name.replace('v', ''))) {
+    const remoteVersion = data.version;
+
+    if (compareVersions(localVersion || '', remoteVersion)) {
       ToastAndroid.show('New update available', ToastAndroid.SHORT);
-      Alert.alert(`Update v${localVersion} -> ${data.tag_name}`, data.body, [
-        {text: 'Cancel'},
-        {
-          text: 'Update',
-          onPress: () =>
-            autoDownload
-              ? downloadUpdate(
-                  data?.assets?.[2]?.browser_download_url,
-                  data.assets?.[2]?.name,
+      Alert.alert(
+        `Update v${localVersion} -> ${remoteVersion}`,
+        data.releaseNotes,
+        [
+          { text: 'Cancel' },
+          {
+            text: 'Update',
+            onPress: () =>
+              autoDownload
+                ? downloadUpdate(
+                  // Ensure the downloadUrl also uses the correct domain
+                  data.downloadUrl.replace('https://your-vercel-app-domain.vercel.app', `https://${VERCEL_API_DOMAIN}`),
+                  data.fileName,
                 )
-              : Linking.openURL(data.html_url),
-        },
-      ]);
+                : Linking.openURL(`https://${VERCEL_API_DOMAIN}/releases`), // Link to your Vercel app's releases page if applicable
+          },
+        ],
+      );
       console.log(
         'local version',
         localVersion,
@@ -138,12 +182,12 @@ export const checkForUpdate = async (
 };
 
 const About = () => {
-  const {primary} = useThemeStore(state => state);
+  const { primary } = useThemeStore(state => state);
   const [updateLoading, setUpdateLoading] = useState(false);
   const [autoDownload, setAutoDownload] = useState(
     settingsStorage.isAutoDownloadEnabled(),
   );
-  const [autoCheckUpdate, setAutoCheckUpdate] = useState<boolean>(
+  const [autoCheckUpdate, setAutoCheckUpdate] = useState(
     settingsStorage.isAutoCheckUpdateEnabled(),
   );
 
@@ -216,36 +260,3 @@ const About = () => {
 
 export default About;
 
-function compareVersions(localVersion: string, remoteVersion: string): boolean {
-  try {
-    // Split versions into arrays and convert to numbers
-    const local = localVersion.split('.').map(Number);
-    const remote = remoteVersion.split('.').map(Number);
-
-    // Compare major version
-    if (remote[0] > local[0]) {
-      return true;
-    }
-    if (remote[0] < local[0]) {
-      return false;
-    }
-
-    // Compare minor version
-    if (remote[1] > local[1]) {
-      return true;
-    }
-    if (remote[1] < local[1]) {
-      return false;
-    }
-
-    // Compare patch version
-    if (remote[2] > local[2]) {
-      return true;
-    }
-
-    return false;
-  } catch (error) {
-    console.error('Invalid version format');
-    return false;
-  }
-}

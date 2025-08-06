@@ -1,4 +1,4 @@
-import {Platform, PermissionsAndroid, Alert} from 'react-native';
+import { Platform, PermissionsAndroid, Alert } from 'react-native';
 
 export default async function requestStoragePermission() {
   try {
@@ -28,4 +28,3 @@ export default async function requestStoragePermission() {
     return false;
   }
 }
-

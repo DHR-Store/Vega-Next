@@ -8,7 +8,7 @@ import {
   Dimensions,
   Switch, // Import Switch
 } from 'react-native';
-import React, {useCallback, useMemo} from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   settingsStorage,
   cacheStorageService,
@@ -16,12 +16,12 @@ import {
 } from '../../lib/storage';
 import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useContentStore from '../../lib/zustand/contentStore';
-import {socialLinks} from '../../lib/constants';
+import { socialLinks } from '../../lib/constants';
 import {
   NativeStackScreenProps,
   NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
-import {SettingsStackParamList, TabStackParamList} from '../../App'; // Keep existing imports
+import { SettingsStackParamList, TabStackParamList } from '../../App'; // Keep existing imports
 import {
   MaterialCommunityIcons,
   AntDesign,
@@ -30,23 +30,23 @@ import {
 } from '@expo/vector-icons';
 import useThemeStore from '../../lib/zustand/themeStore';
 import useWatchHistoryStore from '../../lib/zustand/watchHistrory';
-import Animated, {FadeInDown, FadeInUp, Layout} from 'react-native-reanimated';
-import {useNavigation} from '@react-navigation/native';
+import Animated, { FadeInDown, FadeInUp, Layout } from 'react-native-reanimated';
+import { useNavigation } from '@react-navigation/native';
 
 import RenderProviderFlagIcon from '../../components/RenderProviderFLagIcon';
 import useAppModeStore from '../../lib/zustand/appModeStore'; // Import the new store
 
 type Props = NativeStackScreenProps<SettingsStackParamList, 'Settings'>;
 
-const Settings = ({navigation}: Props) => {
+const Settings = ({ navigation }: Props) => {
   const tabNavigation =
     useNavigation<NativeStackNavigationProp<TabStackParamList>>();
-  const {primary} = useThemeStore(state => state);
-  const {provider, setProvider, installedProviders} = useContentStore(
+  const { primary } = useThemeStore(state => state);
+  const { provider, setProvider, installedProviders } = useContentStore(
     state => state,
   );
-  const {clearHistory} = useWatchHistoryStore(state => state);
-  const {appMode, setAppMode} = useAppModeStore(state => state); // Get appMode and setAppMode
+  const { clearHistory } = useWatchHistoryStore(state => state);
+  const { appMode, setAppMode } = useAppModeStore(state => state); // Get appMode and setAppMode
 
   const handleProviderSelect = useCallback(
     (item: ProviderExtension) => {
@@ -71,9 +71,8 @@ const Settings = ({navigation}: Props) => {
       <TouchableOpacity
         key={item.value}
         onPress={() => handleProviderSelect(item)}
-        className={`mr-3 rounded-lg ${
-          isSelected ? 'bg-[#333333]' : 'bg-[#262626]'
-        }`}
+        className={`mr-3 rounded-lg ${isSelected ? 'bg-[#333333]' : 'bg-[#262626]'
+          }`}
         style={{
           width: Dimensions.get('window').width * 0.3, // Shows 2.5 items
           height: 65, // Increased height
@@ -88,7 +87,7 @@ const Settings = ({navigation}: Props) => {
             {item.display_name}
           </Text>
           {isSelected && (
-            <Text style={{position: 'absolute', top: 6, right: 6}}>
+            <Text style={{ position: 'absolute', top: 6, right: 6 }}>
               <MaterialIcons name="check-circle" size={16} color={primary} />
             </Text>
           )}
@@ -388,7 +387,7 @@ const Settings = ({navigation}: Props) => {
 
               {/* GitHub */}
               <TouchableNativeFeedback
-                onPress={() => Linking.openURL(socialLinks.github)}
+                onPress={() => Linking.openURL('https://github.com/DHR-Store/Vega-Next')}
                 background={TouchableNativeFeedback.Ripple('#333333', false)}>
                 <View className="flex-row items-center justify-between p-4 border-b border-[#262626]">
                   <View className="flex-row items-center">
@@ -403,7 +402,7 @@ const Settings = ({navigation}: Props) => {
 
               {/* sponsore */}
               <TouchableNativeFeedback
-                onPress={() => Linking.openURL(socialLinks.sponsor)}
+                onPress={() => Linking.openURL('https://github.com/DHR-Store/Vega-Next')}
                 background={TouchableNativeFeedback.Ripple('#333333', false)}>
                 <View className="flex-row items-center justify-between p-4">
                   <View className="flex-row items-center">

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, {useCallback, useEffect, useState, useRef} from 'react';
 import {
   View,
   Text,
@@ -10,413 +10,353 @@ import {
   ActivityIndicator,
   StyleSheet,
   SafeAreaView,
+  TextInput,
+  Keyboard,
 } from 'react-native';
-import { MaterialCommunityIcons, Feather, MaterialIcons, Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
+import {Feather, Ionicons} from '@expo/vector-icons';
+import {useNavigation} from '@react-navigation/native';
+import {LinearGradient} from 'expo-linear-gradient';
 import Toast from 'react-native-toast-message';
 
-// Get the window width for responsive design
-const { width } = Dimensions.get('window');
+const {width} = Dimensions.get('window');
+
+// API base URL from user request
+const API_BASE_URL = 'https://jiosaavn-api-privatecvc2.vercel.app';
 
 /**
  * Data class to represent the structure of a music item (Album, Song, Chart, Artist).
- * This mirrors the structure of the data fetched from the API.
- *
- * @param id The unique identifier of the item.
- * @param name The name of the item.
- * @param subtitle The subtitle, often used for artists or descriptions.
- * @param image The list of image links with different sizes.
- * @param artists A list of artist objects, used for songs and albums.
- * @param color A color for the item, used for genres/playlists.
  */
 interface MusicItem {
   id?: string;
   name?: string;
   subtitle?: string;
-  image?: Array<{ link?: string }>;
-  artists?: Array<{ name?: string }>;
+  image?: Array<{link?: string}>;
+  artists?: Array<{name?: string}>;
   color?: string;
   url?: string;
-  album?: {
-    id: string;
-    name: string;
-    url: string;
-  };
 }
 
 /**
- * Data class to hold the entire home page data.
+ * Interface for the overall music data structure.
  */
-interface HomePageData {
-  'trending-songs'?: { songs: MusicItem[] };
-  'new-albums'?: { albums: MusicItem[] };
-  charts?: { charts: MusicItem[] };
-  'top-playlists'?: { playlists: MusicItem[] };
-  'artist-reco'?: { artists: MusicItem[] };
-  'top-albums'?: { albums: MusicItem[] };
-  genres?: { genres: MusicItem[] };
-  'radio-stations'?: { stations: MusicItem[] };
+interface MusicData {
+  charts: MusicItem[];
+  albums: MusicItem[];
+  newReleases: MusicItem[];
 }
 
-/**
- * Utility function to make API calls to the new JioSaavn API.
- * The old API was unstable, so this function is updated to use a new, reliable one.
- * @param path The API endpoint path.
- * @returns The fetched data or null if an error occurs.
- */
-const API_BASE_URL = 'https://saavn.dev/api';
-const fetchData = async (path: string) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}${path}`);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    return data.data;
-  } catch (error) {
-    console.error(`Failed to fetch data from ${path}:`, error);
-    Toast.show({
-      type: 'error',
-      text1: 'API Error',
-      text2: 'Could not fetch data. Please check your network connection.',
-    });
-    return null;
-  }
-};
+// Component to render a section title
+const SectionTitle = ({title}: {title: string}) => (
+  <Text style={styles.sectionTitle}>{title}</Text>
+);
 
-/**
- * Fetches the initial data for the home screen.
- * It fetches multiple modules to populate different sections of the home page.
- */
-const fetchHomePageData = async () => {
-  const data = await fetchData('/modules?language=english,hindi');
-  if (data) {
-    // Mapping the API response to the HomePageData interface
-    const homePageData: HomePageData = {
-      'trending-songs': data['trending-songs'],
-      'new-albums': data['new-albums'],
-      charts: data['charts'],
-      'top-playlists': data['top-playlists'],
-      'artist-reco': data['artist-reco'],
-      'top-albums': data['top-albums'],
-      genres: data['genres'],
-      'radio-stations': data['radio-stations'],
-    };
-    return homePageData;
-  }
-  return null;
-};
+// Component to render a horizontal list of music items
+const MusicHorizontalList = ({data}: {data: MusicItem[]}) => (
+  <FlatList
+    data={data}
+    horizontal
+    showsHorizontalScrollIndicator={false}
+    keyExtractor={item => item.id || Math.random().toString()}
+    renderItem={({item}) => (
+      <View style={styles.itemContainer}>
+        <Image source={{uri: item.image?.[0]?.link}} style={styles.itemImage} />
+        <Text style={styles.itemTitle}>{item.name}</Text>
+        <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
+      </View>
+    )}
+  />
+);
 
-/**
- * Fetches search results for a given query.
- * @param query The search term.
- */
-const fetchSearchResults = async (query: string) => {
-  if (!query) return null;
-  const data = await fetchData(`/search/songs?query=${query}`);
-  return data;
-};
+// Component to render a list of search results
+const SearchResultsList = ({data}: {data: MusicItem[]}) => (
+  <FlatList
+    data={data}
+    keyExtractor={item => item.id || Math.random().toString()}
+    renderItem={({item}) => (
+      <TouchableOpacity style={styles.searchItemContainer}>
+        <Image
+          source={{uri: item.image?.[0]?.link}}
+          style={styles.searchItemImage}
+        />
+        <View style={styles.searchItemTextContainer}>
+          <Text style={styles.searchItemTitle}>{item.name}</Text>
+          <Text style={styles.searchItemSubtitle}>{item.subtitle}</Text>
+        </View>
+      </TouchableOpacity>
+    )}
+  />
+);
 
-const HomePageView = ({ navigation }: { navigation: any }) => {
-  const [data, setData] = useState<HomePageData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+const VegaMusicHome = () => {
+  const navigation = useNavigation();
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [musicData, setMusicData] = useState<MusicData | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResults, setSearchResults] = useState<MusicItem[] | null>(null);
-  const scrollViewRef = useRef<ScrollView>(null);
+  const [isSearching, setIsSearching] = useState<boolean>(false);
 
+  // Ref to track if the component is mounted.
+  const isMounted = useRef(true);
+
+  // Set isMounted to false when the component unmounts.
   useEffect(() => {
-    // Fetch initial home page data on component mount
-    const loadData = async () => {
-      setLoading(true);
-      const homeData = await fetchHomePageData();
-      setData(homeData);
-      setLoading(false);
+    return () => {
+      isMounted.current = false;
     };
-    loadData();
   }, []);
 
-  // Handle the search functionality
-  const handleSearch = useCallback(async () => {
-    if (!searchQuery) {
+  /**
+   * Fetches music data for the home screen from the Saavn API.
+   */
+  const fetchMusicDataFromSaavn = useCallback(async () => {
+    try {
+      if (!isMounted.current) return;
+      setIsLoading(true);
+
+      const response = await fetch(`${API_BASE_URL}/modules?language=english`);
+      const data = await response.json();
+
+      if (isMounted.current) {
+        if (data.status === 'SUCCESS' && data.data) {
+          const apiData = data.data;
+          const transformedData: MusicData = {
+            charts: apiData.charts.map((item: any) => ({
+              id: item.id,
+              name: item.title,
+              subtitle: item.subtitle,
+              image: item.image,
+              color: '#1DB954',
+              url: item.url,
+            })),
+            albums: apiData.albums.map((item: any) => ({
+              id: item.id,
+              name: item.title,
+              subtitle: item.artists
+                ?.map((artist: any) => artist.name)
+                .join(', '),
+              image: item.image,
+              url: item.url,
+            })),
+            newReleases: apiData.new_albums.map((item: any) => ({
+              id: item.id,
+              name: item.title,
+              subtitle: item.artists
+                ?.map((artist: any) => artist.name)
+                .join(', '),
+              image: item.image,
+              url: item.url,
+            })),
+          };
+          setMusicData(transformedData);
+        } else {
+          setMusicData({charts: [], albums: [], newReleases: []});
+        }
+        setIsLoading(false);
+      }
+    } catch (error) {
+      if (isMounted.current) {
+        console.error('Failed to fetch home music data:', error);
+        setMusicData(null);
+        setIsLoading(false);
+        Toast.show({
+          type: 'error',
+          text1: 'Home Data Error',
+          text2: 'Failed to load home music data.',
+        });
+      }
+    }
+  }, []);
+
+  /**
+   * Fetches search results based on the search query.
+   */
+  const fetchSearchResults = useCallback(async (query: string) => {
+    if (!query) {
       setSearchResults(null);
       return;
     }
-    setLoading(true);
-    const results = await fetchSearchResults(searchQuery);
-    setSearchResults(results);
-    setLoading(false);
-    if (scrollViewRef.current) {
-      scrollViewRef.current.scrollTo({ y: 0, animated: true });
-    }
-  }, [searchQuery]);
 
-  // Handle the back button to show home screen again
-  const handleGoBack = useCallback(() => {
-    setSearchQuery('');
-    setSearchResults(null);
-    if (scrollViewRef.current) {
-      scrollViewRef.current.scrollTo({ y: 0, animated: true });
+    if (!isMounted.current) return;
+    setIsSearching(true);
+    Keyboard.dismiss(); // Hide the keyboard
+
+    try {
+      // Use the specific search songs endpoint
+      const response = await fetch(
+        `${API_BASE_URL}/search/songs?query=${encodeURIComponent(query)}`,
+      );
+      const data = await response.json();
+
+      if (isMounted.current) {
+        // The API response structure is different, so we check for 'data.results'
+        if (data.status === 'SUCCESS' && data.data?.results) {
+          const transformedResults = data.data.results.map((item: any) => ({
+            id: item.id,
+            name: item.title,
+            subtitle: item.artists
+              ?.map((artist: any) => artist.name)
+              .join(', '),
+            image: item.image,
+            url: item.url,
+          }));
+          setSearchResults(transformedResults);
+        } else {
+          setSearchResults([]);
+          Toast.show({
+            type: 'info',
+            text1: 'No Results',
+            text2: `No results found for "${query}".`,
+          });
+        }
+        setIsSearching(false);
+      }
+    } catch (error) {
+      if (isMounted.current) {
+        console.error('Failed to fetch search results:', error);
+        setSearchResults(null);
+        setIsSearching(false);
+        Toast.show({
+          type: 'error',
+          text1: 'Search Error',
+          text2: 'Failed to perform search. Please try again.',
+        });
+      }
     }
   }, []);
 
-  const renderCardItem = ({ item }: { item: MusicItem }) => (
-    <TouchableOpacity
-      style={styles.musicItemContainer}
-      onPress={() => console.log('Playing:', item.name)}
-    >
-      <Image
-        source={{ uri: item.image?.find(img => img.link)?.link || 'https://placehold.co/128x128.png?text=Vega' }}
-        style={styles.musicItemImage}
-      />
-      <Text style={styles.musicItemTitle} numberOfLines={1}>{item.name}</Text>
-      <Text style={styles.musicItemSubtitle} numberOfLines={1}>
-        {item.artists?.map(artist => artist.name).join(', ') || item.subtitle}
-      </Text>
-    </TouchableOpacity>
-  );
+  useEffect(() => {
+    fetchMusicDataFromSaavn();
+  }, [fetchMusicDataFromSaavn]);
 
-  const renderSectionHeader = (title: string) => (
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <TouchableOpacity onPress={() => console.log('See all:', title)}>
-        <Text style={styles.seeAllText}>See all</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderPlaylist = ({ item }: { item: MusicItem }) => (
-    <TouchableOpacity
-      style={[
-        styles.playlistItemContainer,
-        { backgroundColor: item.color || '#1e1e1e' },
-      ]}
-      onPress={() => console.log('Viewing playlist:', item.name)}
-    >
-      <Text style={styles.playlistItemText} numberOfLines={2}>
-        {item.name}
-      </Text>
-    </TouchableOpacity>
-  );
-
-  const renderArtist = ({ item }: { item: MusicItem }) => (
-    <TouchableOpacity
-      style={styles.artistListItem}
-      onPress={() => console.log('Viewing artist:', item.name)}
-    >
-      <View style={styles.artistListItemContent}>
-        <Image
-          source={{ uri: item.image?.find(img => img.link)?.link || 'https://placehold.co/48x48.png?text=Artist' }}
-          style={styles.artistListItemImage}
+  const renderContent = () => {
+    if (isSearching) {
+      return (
+        <ActivityIndicator
+          style={styles.loadingIndicator}
+          size="large"
+          color="#FFFFFF"
         />
-        <View style={styles.artistListItemTextContainer}>
-          <Text style={styles.artistListItemTitle} numberOfLines={1}>{item.name}</Text>
-          <Text style={styles.artistListItemSubtitle} numberOfLines={1}>
-            {item.subtitle || 'Artist'}
-          </Text>
+      );
+    }
+
+    if (searchResults) {
+      return (
+        <View style={styles.searchContentContainer}>
+          <Text style={styles.searchTitle}>Search Results</Text>
+          {searchResults.length > 0 ? (
+            <SearchResultsList data={searchResults} />
+          ) : (
+            <Text style={styles.noResultsText}>No results found.</Text>
+          )}
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+      );
+    }
 
-  const renderSearchResults = ({ item }: { item: MusicItem }) => (
-    <TouchableOpacity
-      style={styles.searchResultItem}
-      onPress={() => console.log('Playing search result:', item.name)}
-    >
-      <Image
-        source={{ uri: item.image?.find(img => img.link)?.link || 'https://placehold.co/64x64.png?text=Song' }}
-        style={styles.searchResultImage}
-      />
-      <View style={styles.searchResultTextContainer}>
-        <Text style={styles.searchResultTitle} numberOfLines={1}>{item.name}</Text>
-        <Text style={styles.searchResultSubtitle} numberOfLines={1}>
-          {item.album?.name || item.subtitle}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  );
+    if (isLoading) {
+      return (
+        <ActivityIndicator
+          style={styles.loadingIndicator}
+          size="large"
+          color="#FFFFFF"
+        />
+      );
+    }
 
-  // Loading indicator for fetching data
-  if (loading) {
+    if (!musicData) {
+      return (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Could not load data.</Text>
+          <TouchableOpacity
+            onPress={fetchMusicDataFromSaavn}
+            style={styles.retryButton}>
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#ffffff" />
-          <Text style={styles.loadingText}>Loading Music...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+      <ScrollView style={styles.scrollView}>
+        {musicData.charts.length > 0 && (
+          <View style={styles.section}>
+            <SectionTitle title="Charts" />
+            <FlatList
+              data={musicData.charts}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={item => item.id || Math.random().toString()}
+              renderItem={({item}) => (
+                <LinearGradient
+                  colors={[item.color || '#1DB954', '#121212']}
+                  start={{x: 0, y: 0}}
+                  end={{x: 1, y: 1}}
+                  style={styles.chartItem}>
+                  <Image
+                    source={{uri: item.image?.[0]?.link}}
+                    style={styles.chartImage}
+                  />
+                  <View style={styles.chartTextContainer}>
+                    <Text style={styles.chartTitle}>{item.name}</Text>
+                    <Text style={styles.chartSubtitle}>{item.subtitle}</Text>
+                  </View>
+                </LinearGradient>
+              )}
+            />
+          </View>
+        )}
 
-  // Handle the case where no data is available
-  if (!data && !searchResults) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.errorText}>No music data available.</Text>
-          <Text style={styles.errorSubText}>Please check your network and try again.</Text>
-        </View>
-      </SafeAreaView>
+        {musicData.albums.length > 0 && (
+          <View style={styles.section}>
+            <SectionTitle title="New Albums" />
+            <MusicHorizontalList data={musicData.albums} />
+          </View>
+        )}
+
+        {musicData.newReleases.length > 0 && (
+          <View style={styles.section}>
+            <SectionTitle title="New Releases" />
+            <MusicHorizontalList data={musicData.newReleases} />
+          </View>
+        )}
+      </ScrollView>
     );
-  }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.searchContainer}>
-        {searchResults && (
-          <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#ffffff" />
+      <View style={styles.header}>
+        {searchResults ? (
+          <TouchableOpacity onPress={() => setSearchResults(null)}>
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            onPress={() => {
+              console.log('Open menu');
+            }}>
+            <Feather name="menu" size={24} color="#FFFFFF" />
           </TouchableOpacity>
         )}
-        <View style={styles.searchBar}>
-          <Feather name="search" size={20} color="#b3b3b3" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search for songs, artists, or albums"
-            placeholderTextColor="#b3b3b3"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            onSubmitEditing={handleSearch}
-          />
-        </View>
+        <TextInput
+          style={styles.searchBar}
+          placeholder="Search for songs or artists..."
+          placeholderTextColor="#B3B3B3"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          onSubmitEditing={() => fetchSearchResults(searchQuery)}
+          returnKeyType="search"
+        />
+        <TouchableOpacity
+          onPress={() => {
+            // Navigate to the VegaSettings screen
+            navigation.navigate('VegaSettings');
+          }}>
+          <Ionicons name="settings-outline" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
       </View>
 
-      <ScrollView ref={scrollViewRef} style={styles.scrollView}>
-        {searchResults ? (
-          <View style={styles.searchResultSection}>
-            <Text style={styles.searchResultCount}>
-              Found {searchResults.length} results for "{searchQuery}"
-            </Text>
-            <FlatList
-              data={searchResults}
-              keyExtractor={(item) => item.id || Math.random().toString()}
-              renderItem={renderSearchResults}
-              nestedScrollEnabled
-            />
-          </View>
-        ) : (
-          <>
-            {/* Trending Songs Section */}
-            {data?.['trending-songs']?.songs && data['trending-songs'].songs.length > 0 && (
-              <View>
-                {renderSectionHeader('Trending Songs')}
-                <FlatList
-                  data={data['trending-songs'].songs}
-                  keyExtractor={(item) => item.id || Math.random().toString()}
-                  renderItem={renderCardItem}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalListContent}
-                />
-              </View>
-            )}
+      {renderContent()}
 
-            {/* New Albums Section */}
-            {data?.['new-albums']?.albums && data['new-albums'].albums.length > 0 && (
-              <View>
-                {renderSectionHeader('New Albums')}
-                <FlatList
-                  data={data['new-albums'].albums}
-                  keyExtractor={(item) => item.id || Math.random().toString()}
-                  renderItem={renderCardItem}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalListContent}
-                />
-              </View>
-            )}
-
-            {/* Top Playlists Section */}
-            {data?.['top-playlists']?.playlists && data['top-playlists'].playlists.length > 0 && (
-              <View>
-                {renderSectionHeader('Top Playlists')}
-                <FlatList
-                  data={data['top-playlists'].playlists}
-                  keyExtractor={(item) => item.id || Math.random().toString()}
-                  renderItem={renderPlaylist}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalListContent}
-                />
-              </View>
-            )}
-
-            {/* Top Artists Section */}
-            {data?.['artist-reco']?.artists && data['artist-reco'].artists.length > 0 && (
-              <View>
-                {renderSectionHeader('Artists for You')}
-                <FlatList
-                  data={data['artist-reco'].artists}
-                  keyExtractor={(item) => item.id || Math.random().toString()}
-                  renderItem={renderArtist}
-                  nestedScrollEnabled
-                />
-              </View>
-            )}
-
-            {/* Top Albums Section */}
-            {data?.['top-albums']?.albums && data['top-albums'].albums.length > 0 && (
-              <View>
-                {renderSectionHeader('Top Albums')}
-                <FlatList
-                  data={data['top-albums'].albums}
-                  keyExtractor={(item) => item.id || Math.random().toString()}
-                  renderItem={renderCardItem}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalListContent}
-                />
-              </View>
-            )}
-
-            {/* Charts Section */}
-            {data?.['charts']?.charts && data['charts'].charts.length > 0 && (
-              <View>
-                {renderSectionHeader('Charts')}
-                <FlatList
-                  data={data['charts'].charts}
-                  keyExtractor={(item) => item.id || Math.random().toString()}
-                  renderItem={renderCardItem}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalListContent}
-                />
-              </View>
-            )}
-
-            {/* Genres Section */}
-            {data?.['genres']?.genres && data['genres'].genres.length > 0 && (
-              <View>
-                {renderSectionHeader('Genres')}
-                <FlatList
-                  data={data['genres'].genres}
-                  keyExtractor={(item) => item.id || Math.random().toString()}
-                  renderItem={renderPlaylist}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalListContent}
-                />
-              </View>
-            )}
-
-            {/* Radio Stations Section */}
-            {data?.['radio-stations']?.stations && data['radio-stations'].stations.length > 0 && (
-              <View>
-                {renderSectionHeader('Radio Stations')}
-                <FlatList
-                  data={data['radio-stations'].stations}
-                  keyExtractor={(item) => item.id || Math.random().toString()}
-                  renderItem={renderCardItem}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalListContent}
-                />
-              </View>
-            )}
-          </>
-        )}
-      </ScrollView>
       <Toast />
     </SafeAreaView>
   );
@@ -425,198 +365,181 @@ const HomePageView = ({ navigation }: { navigation: any }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#ffffff',
-    marginTop: 10,
-    fontSize: 16,
-  },
-  errorText: {
-    color: '#ff6347',
-    fontSize: 18,
-    textAlign: 'center',
-    fontWeight: 'bold',
-  },
-  errorSubText: {
-    color: '#ffffff',
-    fontSize: 14,
-    textAlign: 'center',
-    marginTop: 5,
+    backgroundColor: '#121212',
   },
   scrollView: {
     flex: 1,
   },
-  sectionHeader: {
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    marginTop: 24,
-    marginBottom: 8,
-  },
-  sectionTitle: {
-    color: '#ffffff',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  seeAllText: {
-    color: '#B3B3B3',
-    fontSize: 14,
-  },
-  horizontalListContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  musicItemContainer: {
-    width: 128,
-    marginRight: 16,
-  },
-  musicItemImage: {
-    width: 128,
-    height: 128,
-    borderRadius: 8,
-  },
-  musicItemTitle: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginTop: 8,
-  },
-  musicItemSubtitle: {
-    color: '#B3B3B3',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  playlistItemContainer: {
-    width: 128,
-    height: 64,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-    padding: 8,
-  },
-  playlistItemText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  artistListItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#1E1E1E',
-    borderRadius: 8,
-    padding: 16,
-    marginHorizontal: 16,
-    marginVertical: 4,
-  },
-  artistListItemContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  artistListItemImage: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-  },
-  artistListItemTextContainer: {
-    marginLeft: 16,
-    flex: 1,
-  },
-  artistListItemTitle: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  artistListItemSubtitle: {
-    color: '#B3B3B3',
-    fontSize: 12,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E1E1E',
+    borderBottomColor: '#282828',
   },
   searchBar: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+    height: 40,
     backgroundColor: '#282828',
-    borderRadius: 25,
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    color: '#FFFFFF',
+    marginHorizontal: 10,
+  },
+  headerTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  quickAccessContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginTop: 16,
+  },
+  quickAccessButton: {
+    backgroundColor: '#282828',
+    borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
-  },
-  searchIcon: {
     marginRight: 8,
   },
-  searchInput: {
-    flex: 1,
-    color: '#ffffff',
-    fontSize: 16,
-  },
-  backButton: {
-    marginRight: 10,
-    padding: 5,
-  },
-  searchResultSection: {
-    marginTop: 16,
-    marginHorizontal: 16,
-  },
-  searchResultCount: {
-    color: '#B3B3B3',
+  quickAccessText: {
+    color: '#FFFFFF',
     fontSize: 14,
-    marginBottom: 16,
   },
-  searchResultItem: {
+  section: {
+    marginTop: 20,
+    paddingHorizontal: 16,
+  },
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 10,
+  },
+  chartItem: {
+    width: width * 0.7,
+    height: 150,
+    borderRadius: 10,
+    marginRight: 10,
+    padding: 15,
+    justifyContent: 'flex-end',
+  },
+  chartImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 5,
+    position: 'absolute',
+    top: 15,
+    left: 15,
+  },
+  chartTextContainer: {
+    flexDirection: 'column',
+  },
+  chartTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  chartSubtitle: {
+    color: '#B3B3B3',
+    fontSize: 12,
+  },
+  itemContainer: {
+    width: 120,
+    marginRight: 15,
+    alignItems: 'center',
+  },
+  itemImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 10,
+  },
+  itemTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  itemSubtitle: {
+    color: '#B3B3B3',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  loadingIndicator: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchContentContainer: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 20,
+  },
+  searchTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 10,
+  },
+  searchItemContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 15,
     backgroundColor: '#1E1E1E',
     borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
+    padding: 10,
   },
-  searchResultImage: {
-    width: 64,
-    height: 64,
-    borderRadius: 8,
-    marginRight: 12,
+  searchItemImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 5,
+    marginRight: 15,
   },
-  searchResultTextContainer: {
+  searchItemTextContainer: {
     flex: 1,
   },
-  searchResultTitle: {
-    color: '#ffffff',
+  searchItemTitle: {
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
   },
-  searchResultSubtitle: {
+  searchItemSubtitle: {
     color: '#B3B3B3',
-    fontSize: 12,
-    marginTop: 4,
+    fontSize: 14,
+  },
+  noResultsText: {
+    color: '#B3B3B3',
+    textAlign: 'center',
+    marginTop: 50,
+    fontSize: 16,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  errorText: {
+    color: '#B3B3B3',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#1DB954',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 25,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 
-export default function App() {
-  const navigation = useNavigation();
-
-  // Create a placeholder for the actual app container to display HomePageView
-  // In a real React Native app, this would be part of a navigation stack
-  return (
-    <View style={{ flex: 1 }}>
-      <HomePageView navigation={navigation} />
-    </View>
-  );
-}
+export default VegaMusicHome;

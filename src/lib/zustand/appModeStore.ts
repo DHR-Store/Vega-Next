@@ -1,5 +1,3 @@
-// src/lib/zustand/appModeStore.ts
-
 import {create} from 'zustand';
 import {createJSONStorage, persist} from 'zustand/middleware';
 import { MMKV } from 'react-native-mmkv'; // Import MMKV directly
@@ -44,3 +42,4 @@ const useAppModeStore = create<AppModeState>()(
 );
 
 export default useAppModeStore;
+

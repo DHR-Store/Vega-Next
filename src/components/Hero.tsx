@@ -149,7 +149,6 @@ const Hero = memo(({isDrawerOpen, drawerRef}: HeroProps) => {
           <MotiView
             from={{opacity: 0, scale: 0.5}}
             animate={{opacity: 1, scale: 1}}
-            //@ts-ignore
             transition={{type: 'timing', duration: 300}}
             className="w-full items-center justify-center">
             <TextInput

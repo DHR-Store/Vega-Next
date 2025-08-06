@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "941549694662",
+    "project_id": "vega-next",
+    "storage_bucket": "vega-next.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:941549694662:android:2ca6aa16f9bc3a6ba771c7",
+        "android_client_info": {
+          "package_name": "com.vega"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCaiwmkDdM1_ai2d8DFPLUsVu1AS9U7J3s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

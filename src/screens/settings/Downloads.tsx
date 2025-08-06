@@ -1,18 +1,18 @@
-import {View, Text, Image, Platform, TouchableOpacity} from 'react-native';
-import requestStoragePermission from '../../lib/file/getStoragePermission';
+import { View, Text, Image, Platform, TouchableOpacity, ToastAndroid } from 'react-native';
+import requestStoragePermission from '../../lib/file/getStoragePermission'; // Ensure this path is correct
 import * as FileSystem from 'expo-file-system';
-import {downloadFolder} from '../../lib/constants';
+import { downloadFolder } from '../../lib/constants'; // Assuming downloadFolder is defined here, e.g., '/storage/emulated/0/Download/vega'
 import * as VideoThumbnails from 'expo-video-thumbnails';
-import React, {useState, useEffect} from 'react';
-import {settingsStorage, downloadsStorage} from '../../lib/storage';
+import React, { useState, useEffect } from 'react';
+import { settingsStorage, downloadsStorage } from '../../lib/storage';
 import useThemeStore from '../../lib/zustand/themeStore';
-import * as RNFS from '@dr.pogodin/react-native-fs';
+import * as RNFS from '@dr.pogodin/react-native-fs'; // Still imported for RNFS.unlink in deleteFiles
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import {useNavigation} from '@react-navigation/native';
-import {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import {RootStackParamList} from '../../App';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../../App';
 import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
-import {FlashList} from '@shopify/flash-list';
+import { FlashList } from '@shopify/flash-list';
 
 // Define supported video extensions
 const VIDEO_EXTENSIONS = [
@@ -68,17 +68,17 @@ const getBaseName = (fileName: string): string => {
 
 const getEpisodeInfo = (
   fileName: string,
-): {season: number; episode: number} => {
+): { season: number; episode: number } => {
   // Try to match SxxExx format first
   let match = fileName.match(/s(\d{1,2})e(\d{1,2})/i);
   if (match) {
-    return {season: parseInt(match[1], 10), episode: parseInt(match[2], 10)};
+    return { season: parseInt(match[1], 10), episode: parseInt(match[2], 10) };
   }
 
   // Try to match "Season X Episode Y" format
   match = fileName.match(/season[\s.-]*(\d{1,2}).*?episode[\s.-]*(\d{1,2})/i);
   if (match) {
-    return {season: parseInt(match[1], 10), episode: parseInt(match[2], 10)};
+    return { season: parseInt(match[1], 10), episode: parseInt(match[2], 10) };
   }
 
   // Try to match episode number only
@@ -87,11 +87,11 @@ const getEpisodeInfo = (
     fileName.match(/[\s.-](\d{1,2})(?:\s*$|\s*\.)/);
 
   if (match) {
-    return {season: 1, episode: parseInt(match[1], 10)};
+    return { season: 1, episode: parseInt(match[1], 10) };
   }
 
   // Default case
-  return {season: 1, episode: 0};
+  return { season: 1, episode: 0 };
 };
 
 const Downloads = () => {
@@ -99,7 +99,7 @@ const Downloads = () => {
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
-  const {primary} = useThemeStore(state => state);
+  const { primary } = useThemeStore(state => state);
 
   const [groupSelected, setGroupSelected] = useState<string[]>([]);
   const [isSelecting, setIsSelecting] = useState(false);
@@ -111,13 +111,29 @@ const Downloads = () => {
   useEffect(() => {
     const getFiles = async () => {
       setLoading(true);
-      const granted = await requestStoragePermission();
+      const granted = await requestStoragePermission(); // Use the robust permission request
       if (granted) {
         try {
+          // Ensure the path is correctly formatted for FileSystem.readDirectoryAsync
+          // For Android, FileSystem.readDirectoryAsync typically expects paths without 'file://' prefix
+          // if it's a direct path to internal/external storage.
+          // The error indicates a permission issue, not a path format issue.
+          // Assuming `downloadFolder` from `../../lib/constants` is the full path like '/storage/emulated/0/Download/vega'
           const properPath =
             Platform.OS === 'android'
-              ? `file://${downloadFolder}`
-              : downloadFolder;
+              ? downloadFolder // Use downloadFolder directly as it should be an absolute path
+              : downloadFolder; // For iOS, typically a local app directory
+
+          // Check if the directory exists before trying to read it
+          const dirInfo = await FileSystem.getInfoAsync(properPath);
+          if (!dirInfo.exists || !dirInfo.isDirectory) {
+            ToastAndroid.show(
+              `Download directory not found or is not a directory: ${properPath}. Please ensure files are downloaded to this specific location.`,
+              ToastAndroid.LONG,
+            );
+            setLoading(false);
+            return;
+          }
 
           const allFiles = await FileSystem.readDirectoryAsync(properPath);
 
@@ -126,10 +142,11 @@ const Downloads = () => {
 
           const filesInfo = await Promise.all(
             videoFiles.map(async file => {
+              // Construct the full file path for getInfoAsync
               const filePath =
                 Platform.OS === 'android'
-                  ? `file://${downloadFolder}/${file}`
-                  : `${downloadFolder}/${file}`;
+                  ? `file://${properPath}/${file}` // Add file:// prefix for FileInfo.uri
+                  : `${properPath}/${file}`;
 
               const fileInfo = await FileSystem.getInfoAsync(filePath);
               return fileInfo;
@@ -140,10 +157,20 @@ const Downloads = () => {
           downloadsStorage.saveFilesInfo(filesInfo);
           setFiles(filesInfo);
           setLoading(false);
-        } catch (error) {
+        } catch (error: any) { // Catching as 'any' to access 'message' property
           console.error('Error reading files:', error);
+          let errorMessage = 'An unexpected error occurred while reading downloaded files.';
+          if (error.message && error.message.includes('isn\'t readable')) {
+            errorMessage = `Cannot access download folder: "${downloadFolder}". This might be due to Android's storage restrictions (Scoped Storage) or insufficient permissions for this specific subfolder. Please ensure the app has access to this directory or files are in a location managed by the app.`;
+          } else if (error.message) {
+            errorMessage = `Error: ${error.message}`;
+          }
+          ToastAndroid.show(errorMessage, ToastAndroid.LONG);
           setLoading(false);
         }
+      } else {
+        ToastAndroid.show('Storage permission not granted. Cannot display downloads.', ToastAndroid.LONG);
+        setLoading(false);
       }
     };
     getFiles();
@@ -157,7 +184,7 @@ const Downloads = () => {
         return null;
       }
 
-      const {uri} = await VideoThumbnails.getThumbnailAsync(file.uri, {
+      const { uri } = await VideoThumbnails.getThumbnailAsync(file.uri, {
         time: 100000,
       });
       return uri;
@@ -174,14 +201,14 @@ const Downloads = () => {
         const thumbnailPromises = files.map(async file => {
           const thumbnail = await getThumbnail(file);
           if (thumbnail) {
-            return {[file.uri]: thumbnail};
+            return { [file.uri]: thumbnail };
           }
           return null;
         });
 
         const thumbnailResults = await Promise.all(thumbnailPromises);
         const newThumbnails = thumbnailResults.reduce((acc, curr) => {
-          return curr ? {...acc, ...curr} : acc;
+          return curr ? { ...acc, ...curr } : acc;
         }, {});
 
         // Save thumbnails to storage and fix the type error by ensuring non-null
@@ -244,6 +271,7 @@ const Downloads = () => {
       // Optional: Show success message
     } catch (error) {
       console.error('Error deleting files:', error);
+      ToastAndroid.show('Failed to delete files.', ToastAndroid.SHORT);
     }
   };
 
@@ -334,13 +362,12 @@ const Downloads = () => {
             </View>
           )
         }
-        renderItem={({item}) => (
+        renderItem={({ item }) => (
           <TouchableOpacity
-            className={`flex-1 m-0.5 rounded-lg overflow-hidden ${
-              isSelecting && groupSelected.includes(item.episodes[0].uri)
+            className={`flex-1 m-0.5 rounded-lg overflow-hidden ${isSelecting && groupSelected.includes(item.episodes[0].uri)
                 ? 'bg-quaternary'
                 : 'bg-tertiary'
-            }`}
+              }`}
             onLongPress={() => {
               if (settingsStorage.isHapticFeedbackEnabled()) {
                 RNReactNativeHapticFeedback.trigger('effectTick', {
@@ -379,7 +406,7 @@ const Downloads = () => {
                   const file = item.episodes[0];
                   const fileName = file.uri.split('/').pop() || '';
                   navigation.navigate('Player', {
-                    episodeList: [{title: fileName, link: file.uri}],
+                    episodeList: [{ title: fileName, link: file.uri }],
                     linkIndex: 0,
                     type: '',
                     directUrl: file.uri,
@@ -408,7 +435,7 @@ const Downloads = () => {
             <View className="relative aspect-[2/3]">
               {item.thumbnail ? (
                 <Image
-                  source={{uri: item.thumbnail}}
+                  source={{ uri: item.thumbnail }}
                   className="w-full h-full rounded-t-lg"
                   resizeMode="cover"
                 />
