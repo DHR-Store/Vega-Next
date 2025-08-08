@@ -74,7 +74,9 @@
     "react-native-video": "^6.11.0",
     "react-native-volume-manager": "^2.0.8",
     "react-native-webview": "^13.12.5",
-    "zustand": "^4.5.2"
+    "zustand": "^4.5.2",
+    "expo-notifications": "~0.29.14",
+    "expo-task-manager": "~12.0.6"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

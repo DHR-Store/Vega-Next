@@ -10,16 +10,16 @@ import {
   Platform,
   Linking,
 } from 'react-native';
-import React, { useEffect, useRef } from 'react';
-import { Stream } from '../lib/providers/types';
-import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import React, {useEffect, useRef} from 'react';
+import {Stream} from '../lib/providers/types';
+import BottomSheet, {BottomSheetScrollView} from '@gorhom/bottom-sheet';
+import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import SkeletonLoader from './Skeleton';
 import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
-import { Clipboard } from 'react-native';
+import {Clipboard} from 'react-native';
 import useThemeStore from '../lib/zustand/themeStore';
-import { TextTrackType } from 'react-native-video';
-import { settingsStorage } from '../lib/storage';
+import {TextTrackType} from 'react-native-video';
+import {settingsStorage} from '../lib/storage';
 
 // Removed: import RNFS from 'react-native-fs';
 // Removed: import PushNotification from 'react-native-push-notification';
@@ -52,7 +52,7 @@ const DownloadBottomSheet = ({
   isExternalDownloadMode,
 }: Props) => {
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const { primary } = useThemeStore(state => state);
+  const {primary} = useThemeStore(state => state);
   const [activeTab, setActiveTab] = React.useState<1 | 2>(1);
 
   const subtitle = data?.map(server => {
@@ -146,17 +146,17 @@ const DownloadBottomSheet = ({
             // detached={true}
             enablePanDownToClose={true}
             snapPoints={['30%', 450]}
-            containerStyle={{ marginHorizontal: 5 }}
+            containerStyle={{marginHorizontal: 5}}
             ref={bottomSheetRef}
-            backgroundStyle={{ backgroundColor: '#1a1a1a' }}
-            handleIndicatorStyle={{ backgroundColor: '#333' }}
+            backgroundStyle={{backgroundColor: '#1a1a1a'}}
+            handleIndicatorStyle={{backgroundColor: '#333'}}
             onClose={() => setModal(false)}>
             <Pressable className="flex-1" onPress={e => e.stopPropagation()}>
               <Text className="text-white text-xl p-1 font-semibold text-center">
                 {title}
               </Text>
               <BottomSheetScrollView
-                style={{ padding: 5, marginBottom: 5 }}
+                style={{padding: 5, marginBottom: 5}}
                 showsVerticalScrollIndicator={false}>
                 {subtitle.length > 0 && subtitle[0] !== undefined && (
                   <View className="flex-row items-center justify-center gap-x-3 w-full my-5">
@@ -185,16 +185,16 @@ const DownloadBottomSheet = ({
                   </View>
                 )}
                 {loading
-                  ? Array.from({ length: 4 }).map((_, index) => (
-                    <SkeletonLoader
-                      key={index}
-                      width={Dimensions.get('window').width - 30}
-                      height={35}
-                      marginVertical={5}
-                    />
-                  ))
+                  ? Array.from({length: 4}).map((_, index) => (
+                      <SkeletonLoader
+                        key={index}
+                        width={Dimensions.get('window').width - 30}
+                        height={35}
+                        marginVertical={5}
+                      />
+                    ))
                   : activeTab === 1
-                    ? data.map((item, index) => (
+                  ? data.map((item, index) => (
                       <TouchableOpacity
                         className="p-2 bg-white/30 rounded-md my-1"
                         key={`${item.link}-${index}`}
@@ -218,62 +218,62 @@ const DownloadBottomSheet = ({
                             requestDownloadPermissionAndStart(item, 'video');
                           }
                         }}>
-                        <Text style={{ color: 'white' }}>{item.server}</Text>
+                        <Text style={{color: 'white'}}>{item.server}</Text>
                       </TouchableOpacity>
                     ))
-                    : subtitle.length > 0
-                      ? subtitle.map(
-                        subs =>
-                          subs?.map((item, index) => (
-                            <TouchableOpacity
-                              className="p-2 bg-white/30 rounded-md my-1"
-                              key={`${item.uri}-${index}`}
-                              onLongPress={() => {
-                                if (settingsStorage.isHapticFeedbackEnabled()) {
-                                  RNReactNativeHapticFeedback.trigger(
-                                    'effectTick',
-                                    {
-                                      enableVibrateFallback: true,
-                                      ignoreAndroidSystemSettings: false,
-                                    },
-                                  );
-                                }
-                                Clipboard.setString(item.uri);
-                                ToastAndroid.show(
-                                  'Link copied',
-                                  ToastAndroid.SHORT,
+                  : subtitle.length > 0
+                  ? subtitle.map(
+                      subs =>
+                        subs?.map((item, index) => (
+                          <TouchableOpacity
+                            className="p-2 bg-white/30 rounded-md my-1"
+                            key={`${item.uri}-${index}`}
+                            onLongPress={() => {
+                              if (settingsStorage.isHapticFeedbackEnabled()) {
+                                RNReactNativeHapticFeedback.trigger(
+                                  'effectTick',
+                                  {
+                                    enableVibrateFallback: true,
+                                    ignoreAndroidSystemSettings: false,
+                                  },
                                 );
-                              }}
-                              onPress={() => {
-                                // Logic to decide between external and internal "download" for subtitles
-                                if (isExternalDownloadMode) {
-                                  // If external download mode is enabled, open the URI in a browser
-                                  openLinkInBrowser(item.uri);
-                                } else {
-                                  // Otherwise, prepare subtitle item and trigger the placeholder internal "download"
-                                  const subItem = {
-                                    ...item,
-                                    link: item.uri,
-                                    server: 'Subtitles',
-                                    type:
-                                      item.type === TextTrackType.VTT
-                                        ? 'vtt'
-                                        : 'srt',
-                                  };
-                                  requestDownloadPermissionAndStart(
-                                    subItem,
-                                    'subtitle',
-                                  );
-                                }
-                              }}>
-                              <Text style={{ color: 'white' }}>
-                                {item.language}
-                                {' - '} {item.title}
-                              </Text>
-                            </TouchableOpacity>
-                          )),
-                      )
-                      : null}
+                              }
+                              Clipboard.setString(item.uri);
+                              ToastAndroid.show(
+                                'Link copied',
+                                ToastAndroid.SHORT,
+                              );
+                            }}
+                            onPress={() => {
+                              // Logic to decide between external and internal "download" for subtitles
+                              if (isExternalDownloadMode) {
+                                // If external download mode is enabled, open the URI in a browser
+                                openLinkInBrowser(item.uri);
+                              } else {
+                                // Otherwise, prepare subtitle item and trigger the placeholder internal "download"
+                                const subItem = {
+                                  ...item,
+                                  link: item.uri,
+                                  server: 'Subtitles',
+                                  type:
+                                    item.type === TextTrackType.VTT
+                                      ? 'vtt'
+                                      : 'srt',
+                                };
+                                requestDownloadPermissionAndStart(
+                                  subItem,
+                                  'subtitle',
+                                );
+                              }
+                            }}>
+                            <Text style={{color: 'white'}}>
+                              {item.language}
+                              {' - '} {item.title}
+                            </Text>
+                          </TouchableOpacity>
+                        )),
+                    )
+                  : null}
                 {data.length === 0 && !loading && (
                   <Text className="text-red-500 text-lg text-center">
                     No server found
