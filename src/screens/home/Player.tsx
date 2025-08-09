@@ -8,7 +8,8 @@ import {
   StatusBar,
   Platform,
   TouchableNativeFeedback,
-  AppState,
+  // We'll need NativeModules for the Android PIP fix
+  NativeModules,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -23,7 +24,7 @@ import {RootStackParamList} from '../../App';
 import {cacheStorage, settingsStorage} from '../../lib/storage';
 import {OrientationLocker, LANDSCAPE} from 'react-native-orientation-locker';
 import VideoPlayer from '@8man/react-native-media-console';
-import {useNavigation, useIsFocused} from '@react-navigation/native';
+import {useNavigation} from '@react-navigation/native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import {
   VideoRef,
@@ -49,18 +50,19 @@ import {
   usePlayerSettings,
 } from '../../lib/hooks/usePlayerSettings';
 
+// A custom native module is needed to trigger Android's Picture-in-Picture mode.
+// We'll assume a module named "VideoPlayerModule" with a method "enterPipMode".
+// You will need to create this native module in your Android project.
+const {VideoPlayerModule} = NativeModules;
+
 type Props = NativeStackScreenProps<RootStackParamList, 'Player'>;
 
 const Player = ({route}: Props): React.JSX.Element => {
   const {primary} = useThemeStore(state => state);
   const {provider} = useContentStore();
   const navigation = useNavigation();
-  const isFocused = useIsFocused();
   const {addItem, updatePlaybackInfo, updateItemWithInfo} =
     useWatchHistoryStore();
-
-  // State to track if the player is in Picture-in-Picture mode
-  const [isPiPMode, setIsPiPMode] = useState(false);
 
   // Player ref
   const playerRef: React.RefObject<VideoRef> = useRef(null);
@@ -106,7 +108,6 @@ const Player = ({route}: Props): React.JSX.Element => {
 
   const settingsStyle = useAnimatedStyle(() => ({
     transform: [{translateY: settingsTranslateY.value}],
-
     opacity: settingsOpacity.value,
   }));
 
@@ -320,15 +321,12 @@ const Player = ({route}: Props): React.JSX.Element => {
 
   // Exit fullscreen on back
   useEffect(() => {
-    // Only enable fullscreen when the component is focused to prevent issues
-    if (isFocused) {
-      FullScreenChz.enable();
-    }
+    FullScreenChz.enable();
     const unsubscribe = navigation.addListener('beforeRemove', () => {
       FullScreenChz.disable();
     });
     return unsubscribe;
-  }, [navigation, isFocused]);
+  }, [navigation]);
 
   // Reset track selections when stream changes
   useEffect(() => {
@@ -506,30 +504,6 @@ const Player = ({route}: Props): React.JSX.Element => {
     });
   }, [showSettings]);
 
-  // Handle app state changes for PIP
-  useEffect(() => {
-    const handleAppStateChange = (nextAppState: any) => {
-      if (
-        Platform.OS === 'android' &&
-        nextAppState === 'background' &&
-        !isPiPMode &&
-        playerRef.current
-      ) {
-        // Automatically enter PIP mode when the app goes to the background
-        playerRef.current.enterPictureInPicture();
-      }
-    };
-
-    const subscription = AppState.addEventListener(
-      'change',
-      handleAppStateChange,
-    );
-
-    return () => {
-      subscription.remove();
-    };
-  }, [isPiPMode]);
-
   // Memoized video player props
   const videoPlayerProps = useMemo(
     () => ({
@@ -544,12 +518,12 @@ const Player = ({route}: Props): React.JSX.Element => {
         shouldCache: true,
         ...(selectedStream?.type === 'm3u8' && {type: 'm3u8'}),
         headers: selectedStream?.headers,
-        // The metadata needs to be more robust for better notifications on Android
         metadata: {
           title: route.params?.primaryTitle,
-          artist: route.params?.secondaryTitle, // Using secondary title for artist
-          album: activeEpisode?.title, // Using episode title for album
-          artwork: route.params?.poster?.poster || '',
+          subtitle: activeEpisode?.title,
+          artist: activeEpisode?.title,
+          description: activeEpisode?.title,
+          imageUri: route.params?.poster?.poster,
         },
       },
       onProgress: handleProgress,
@@ -588,6 +562,8 @@ const Player = ({route}: Props): React.JSX.Element => {
       disableVolume: true,
       showHours: true,
       progressUpdateInterval: 1000,
+      // This is the key prop for the notification, you were already using it.
+      // The issue is likely with the Android native setup.
       showNotificationControls: showMediaControls,
       onError: handleVideoError,
       resizeMode,
@@ -601,15 +577,6 @@ const Player = ({route}: Props): React.JSX.Element => {
       controlAnimationTiming: 357,
       controlTimeoutDelay: 10000,
       hideAllControlls: isPlayerLocked,
-      // Fixes for PIP
-      onPictureInPictureModeChanged: (e: any) => {
-        setIsPiPMode(e.isPictureInPictureActive);
-      },
-      // Restores the app from PIP mode
-      onRestoreUserInterfaceForPictureInPictureStop: () => {
-        // You might want to handle navigation or state here if needed
-        console.log('Restoring from PIP');
-      },
     }),
     [
       isPlayerLocked,
@@ -683,6 +650,27 @@ const Player = ({route}: Props): React.JSX.Element => {
       </SafeAreaView>
     );
   }
+
+  const handlePipPress = () => {
+    // The playerRef?.current?.enterPictureInPicture(); call is for iOS.
+    // For Android, you need to call a native method.
+    if (Platform.OS === 'android') {
+      try {
+        // This is a hypothetical call to a native module.
+        // You MUST create this module and its method on the Android side.
+        VideoPlayerModule.enterPipMode();
+      } catch (error) {
+        console.error('Failed to enter PIP mode:', error);
+        ToastAndroid.show(
+          'PIP is not available on this device.',
+          ToastAndroid.SHORT,
+        );
+      }
+    } else if (Platform.OS === 'ios') {
+      // The original iOS implementation
+      playerRef?.current?.enterPictureInPicture();
+    }
+  };
 
   return (
     <SafeAreaView
@@ -788,13 +776,10 @@ const Player = ({route}: Props): React.JSX.Element => {
 
           {/* PIP */}
           {!Platform.isTV && (
+            // The onPress handler is updated to call our new function
             <TouchableOpacity
               className="flex-row gap-1 items-center opacity-60"
-              onPress={() => {
-                // The `enterPictureInPicture()` method is handled by the video ref.
-                // We'll also update the isPiPMode state to reflect this.
-                playerRef?.current?.enterPictureInPicture();
-              }}>
+              onPress={handlePipPress}>
               <MaterialIcons
                 name="picture-in-picture"
                 size={24}

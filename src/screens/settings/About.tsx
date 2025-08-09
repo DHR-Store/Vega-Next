@@ -22,10 +22,10 @@ import * as Notifications from 'expo-notifications'; // Import expo-notification
 import * as TaskManager from 'expo-task-manager'; // Import TaskManager
 
 // Define a name for the background notification task
-// This task will run when a push notification is received while the app is in the background or closed.
+// This task can be used for custom processing of notifications received in the background.
 const BACKGROUND_NOTIFICATION_TASK = 'background-notification-task';
 
-// Configure Expo Notifications to show alerts when app is in foreground
+// Configure Expo Notifications to show alerts when the app is in the foreground
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -34,7 +34,8 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// Register the task with TaskManager. This needs to be outside the component.
+// Register the task with TaskManager. This must be done outside the component.
+// The `data` payload here is what your backend sends in the push notification.
 TaskManager.defineTask(
   BACKGROUND_NOTIFICATION_TASK,
   ({data, error, executionInfo}) => {
@@ -42,10 +43,8 @@ TaskManager.defineTask(
       console.error('Background task error:', error);
       return;
     }
-    // The 'data' payload is what your backend sends.
     console.log('Received a background notification!', data);
-    // Here, you can process the notification data and perform tasks
-    // like saving the notification to local storage or making an API call.
+    // Add any custom logic for processing background notifications here.
   },
 );
 
@@ -252,58 +251,6 @@ async function registerForPushNotificationsAsync() {
   return token;
 }
 
-// Function to send a custom text notification via your Vercel backend
-export const sendPushNotificationViaBackend = async (pushToken, title) => {
-  if (!pushToken) {
-    ToastAndroid.show(
-      'Push token not available. Register for notifications first.',
-      ToastAndroid.LONG,
-    );
-    return;
-  }
-
-  try {
-    const VERCEL_API_DOMAIN = 'my-update-server-ij9t.vercel.app'; // Your Vercel domain
-    const response = await fetch(
-      `https://${VERCEL_API_DOMAIN}/api/send-push-notification`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          pushToken: pushToken,
-          title: title,
-          // The 'message' is no longer sent from the app as it is hardcoded on the server.
-        }),
-      },
-    );
-
-    const data = await response.json();
-    if (response.ok) {
-      ToastAndroid.show(
-        'Push notification sent via backend!',
-        ToastAndroid.SHORT,
-      );
-      console.log('Backend response:', data);
-    } else {
-      ToastAndroid.show(
-        `Failed to send push notification: ${
-          data.error || response.statusText
-        }`,
-        ToastAndroid.LONG,
-      );
-      console.error('Backend error:', data);
-    }
-  } catch (error) {
-    ToastAndroid.show(
-      'Network error sending push notification.',
-      ToastAndroid.LONG,
-    );
-    console.error('Network error sending push notification:', error);
-  }
-};
-
 const About = () => {
   const {primary} = useThemeStore(state => state);
   const [updateLoading, setUpdateLoading] = useState(false);
@@ -313,24 +260,19 @@ const About = () => {
   const [autoCheckUpdate, setAutoCheckUpdate] = useState(
     settingsStorage.isAutoCheckUpdateEnabled(),
   );
-  const [expoPushToken, setExpoPushToken] = useState(''); // State to store the push token
+
   const notificationListener = useRef();
   const responseListener = useRef();
 
   useEffect(() => {
-    // This is a clean approach to use Expo Notifications for both foreground and background notifications.
-    // If you need to use another library like Notifee for more advanced local notifications, you
-    // can install it and use it for that purpose, but it should not be configured to handle
-    // remote push notifications to avoid conflicts.
-
     // Register for push notifications and the background task
     registerForPushNotificationsAsync().then(token => {
-      setExpoPushToken(token);
       console.log(
         'Successfully registered for push notifications and got token.',
       );
     });
 
+    // Register the background task with the app
     Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK)
       .then(() => {
         console.log('Background notification task registered.');
@@ -344,24 +286,21 @@ const About = () => {
         );
       });
 
-    // This listener is fired whenever a notification is received while the app is foregrounded
+    // This listener is fired whenever a notification is received while the app is foregrounded.
+    // It's still good to have this to handle notifications when the user is actively using the app.
     notificationListener.current =
       Notifications.addNotificationReceivedListener(notification => {
         console.log('Notification received (foreground):', notification);
-        // You can display an in-app alert or custom UI here if needed
-        Alert.alert(
-          notification.request.content.title || 'Notification',
-          notification.request.content.body || 'You received a notification!',
-          [{text: 'OK'}],
-        );
+        // You can add custom foreground UI here if needed, like a Toast or an in-app message.
       });
 
     // This listener is fired whenever a user taps on or interacts with a notification
-    // (works when app is foregrounded, backgrounded, or killed)
+    // (works when app is foregrounded, backgrounded, or killed).
+    // The default behavior is to bring the app to the foreground.
     responseListener.current =
       Notifications.addNotificationResponseReceivedListener(response => {
         console.log('Notification response received:', response);
-        // Handle navigation or specific actions based on notification data
+        // You can add logic here to navigate to a specific screen based on the notification data.
       });
 
     // Clean up listeners when the component unmounts
@@ -431,39 +370,6 @@ const About = () => {
             <View className="flex-row items-center space-x-3">
               <MaterialCommunityIcons name="update" size={22} color="white" />
               <Text className="text-white text-base">Check for Updates</Text>
-            </View>
-            <Feather name="chevron-right" size={20} color="white" />
-          </View>
-        </TouchableNativeFeedback>
-
-        {/* Display Push Token */}
-        {expoPushToken ? (
-          <View className="bg-white/10 p-4 rounded-lg flex-row justify-between items-center mt-4">
-            <Text className="text-white text-base">Your Push Token:</Text>
-            <Text
-              selectable={true}
-              className="text-white/70 text-xs ml-2 flex-1">
-              {expoPushToken}
-            </Text>
-          </View>
-        ) : (
-          <View className="bg-white/10 p-4 rounded-lg flex-row justify-center items-center mt-4">
-            <Text className="text-gray-400 text-sm">Getting push token...</Text>
-          </View>
-        )}
-
-        {/* New: Send Push Notification via Backend Button */}
-        <TouchableNativeFeedback
-          onPress={() =>
-            sendPushNotificationViaBackend(expoPushToken, 'Hello from Vercel!')
-          }
-          background={TouchableNativeFeedback.Ripple('#ffffff20', false)}>
-          <View className="bg-white/10 p-4 rounded-lg flex-row justify-between items-center mt-4">
-            <View className="flex-row items-center space-x-3">
-              <Feather name="send" size={22} color="white" />
-              <Text className="text-white text-base">
-                Send Push Notification (Backend)
-              </Text>
             </View>
             <Feather name="chevron-right" size={20} color="white" />
           </View>

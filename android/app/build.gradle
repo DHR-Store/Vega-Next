@@ -92,7 +92,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 145
-        versionName "3.2.4"
+        versionName "3.2.5"
     }
 
     // ADD THIS 'splits' BLOCK HERE for ABI configuration
