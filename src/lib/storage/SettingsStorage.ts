@@ -16,7 +16,11 @@ export enum SettingsKeys {
   // Update settings
   AUTO_CHECK_UPDATE = 'autoCheckUpdate',
   AUTO_DOWNLOAD = 'autoDownload',
-
+  
+  // --- EDITED: New keys for local server and background notifications ---
+  LOCAL_SERVER_ENABLED = 'localServerEnabled',
+  SHOW_BACKGROUND_NOTIFICATION = 'showBackgroundNotification',
+  
   // Player settings
   SHOW_MEDIA_CONTROLS = 'showMediaControls',
   SHOW_HAMBURGER_MENU = 'showHamburgerMenu',
@@ -106,11 +110,34 @@ export class SettingsStorage {
   }
 
   isAutoDownloadEnabled(): boolean {
-    return mainStorage.getBool(SettingsKeys.AUTO_DOWNLOAD);
+    return mainStorage.getBool(SettingsKeys.AUTO_DOWNLOAD) === null
+      ? true
+      : mainStorage.getBool(SettingsKeys.AUTO_DOWNLOAD);
   }
 
   setAutoDownloadEnabled(enabled: boolean): void {
     mainStorage.setBool(SettingsKeys.AUTO_DOWNLOAD, enabled);
+  }
+
+  // --- EDITED: New methods for local server and background notifications ---
+  isLocalServerEnabled(): boolean {
+    return mainStorage.getBool(SettingsKeys.LOCAL_SERVER_ENABLED) === null
+      ? false
+      : mainStorage.getBool(SettingsKeys.LOCAL_SERVER_ENABLED);
+  }
+  
+  setLocalServerEnabled(enabled: boolean): void {
+    mainStorage.setBool(SettingsKeys.LOCAL_SERVER_ENABLED, enabled);
+  }
+  
+  isBackgroundNotificationEnabled(): boolean {
+    return mainStorage.getBool(SettingsKeys.SHOW_BACKGROUND_NOTIFICATION) === null
+      ? true
+      : mainStorage.getBool(SettingsKeys.SHOW_BACKGROUND_NOTIFICATION);
+  }
+  
+  setBackgroundNotificationEnabled(enabled: boolean): void {
+    mainStorage.setBool(SettingsKeys.SHOW_BACKGROUND_NOTIFICATION, enabled);
   }
 
   // Player settings
@@ -135,7 +162,9 @@ export class SettingsStorage {
   }
 
   hideSeekButtons(): boolean {
-    return mainStorage.getBool(SettingsKeys.HIDE_SEEK_BUTTONS);
+    return mainStorage.getBool(SettingsKeys.HIDE_SEEK_BUTTONS) === null
+      ? false
+      : mainStorage.getBool(SettingsKeys.HIDE_SEEK_BUTTONS);
   }
 
   setHideSeekButtons(hide: boolean): void {
@@ -143,7 +172,9 @@ export class SettingsStorage {
   }
 
   isEnable2xGestureEnabled(): boolean {
-    return mainStorage.getBool(SettingsKeys.ENABLE_2X_GESTURE);
+    return mainStorage.getBool(SettingsKeys.ENABLE_2X_GESTURE) === null
+      ? false
+      : mainStorage.getBool(SettingsKeys.ENABLE_2X_GESTURE);
   }
 
   setEnable2xGesture(enabled: boolean): void {
@@ -151,9 +182,9 @@ export class SettingsStorage {
   }
 
   isSwipeGestureEnabled(): boolean {
-    return mainStorage.getBool(SettingsKeys.ENABLE_SWIPE_GESTURE, true) === null
+    return mainStorage.getBool(SettingsKeys.ENABLE_SWIPE_GESTURE) === null
       ? true
-      : mainStorage.getBool(SettingsKeys.ENABLE_SWIPE_GESTURE, true);
+      : mainStorage.getBool(SettingsKeys.ENABLE_SWIPE_GESTURE);
   }
 
   setSwipeGestureEnabled(enabled: boolean): void {

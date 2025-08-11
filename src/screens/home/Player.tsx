@@ -8,8 +8,6 @@ import {
   StatusBar,
   Platform,
   TouchableNativeFeedback,
-  // We'll need NativeModules for the Android PIP fix
-  NativeModules,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -49,11 +47,6 @@ import {
   usePlayerProgress,
   usePlayerSettings,
 } from '../../lib/hooks/usePlayerSettings';
-
-// A custom native module is needed to trigger Android's Picture-in-Picture mode.
-// We'll assume a module named "VideoPlayerModule" with a method "enterPipMode".
-// You will need to create this native module in your Android project.
-const {VideoPlayerModule} = NativeModules;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Player'>;
 
@@ -108,6 +101,7 @@ const Player = ({route}: Props): React.JSX.Element => {
 
   const settingsStyle = useAnimatedStyle(() => ({
     transform: [{translateY: settingsTranslateY.value}],
+
     opacity: settingsOpacity.value,
   }));
 
@@ -562,8 +556,6 @@ const Player = ({route}: Props): React.JSX.Element => {
       disableVolume: true,
       showHours: true,
       progressUpdateInterval: 1000,
-      // This is the key prop for the notification, you were already using it.
-      // The issue is likely with the Android native setup.
       showNotificationControls: showMediaControls,
       onError: handleVideoError,
       resizeMode,
@@ -650,27 +642,6 @@ const Player = ({route}: Props): React.JSX.Element => {
       </SafeAreaView>
     );
   }
-
-  const handlePipPress = () => {
-    // The playerRef?.current?.enterPictureInPicture(); call is for iOS.
-    // For Android, you need to call a native method.
-    if (Platform.OS === 'android') {
-      try {
-        // This is a hypothetical call to a native module.
-        // You MUST create this module and its method on the Android side.
-        VideoPlayerModule.enterPipMode();
-      } catch (error) {
-        console.error('Failed to enter PIP mode:', error);
-        ToastAndroid.show(
-          'PIP is not available on this device.',
-          ToastAndroid.SHORT,
-        );
-      }
-    } else if (Platform.OS === 'ios') {
-      // The original iOS implementation
-      playerRef?.current?.enterPictureInPicture();
-    }
-  };
 
   return (
     <SafeAreaView
@@ -776,10 +747,11 @@ const Player = ({route}: Props): React.JSX.Element => {
 
           {/* PIP */}
           {!Platform.isTV && (
-            // The onPress handler is updated to call our new function
             <TouchableOpacity
               className="flex-row gap-1 items-center opacity-60"
-              onPress={handlePipPress}>
+              onPress={() => {
+                playerRef?.current?.enterPictureInPicture();
+              }}>
               <MaterialIcons
                 name="picture-in-picture"
                 size={24}

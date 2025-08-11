@@ -1,5 +1,7 @@
-import notifee, {AndroidImportance} from '@notifee/react-native';
+import notifee, {AndroidImportance, EventType} from '@notifee/react-native';
 import {settingsStorage} from '../storage';
+import * as RNFS from '@dr.pogodin/react-native-fs';
+import {ToastAndroid, Linking, Platform} from 'react-native';
 
 export interface NotificationOptions {
   id: string;
@@ -36,6 +38,7 @@ class NotificationService {
   constructor() {
     this.initialize();
   }
+
   private async initialize() {
     if (this.initialized) {
       return;
@@ -160,12 +163,48 @@ class NotificationService {
   /**
    * Set up event handlers for notification actions
    */
-  setupEventHandlers(
-    foregroundHandler: (event: any) => void,
-    backgroundHandler: (event: any) => Promise<void>,
-  ) {
-    notifee.onForegroundEvent(foregroundHandler);
-    notifee.onBackgroundEvent(backgroundHandler);
+  setupEventHandlers() {
+    // Foreground event handler
+    notifee.onForegroundEvent(({ type, detail }) => {
+      if (type === EventType.ACTION_PRESS) {
+        if (detail.pressAction.id === 'install') {
+          this.installUpdate(detail.notification.data?.name);
+        }
+      }
+    });
+
+    // Background event handler
+    notifee.onBackgroundEvent(async ({ type, detail }) => {
+      if (type === EventType.ACTION_PRESS) {
+        if (detail.pressAction.id === 'install') {
+          this.installUpdate(detail.notification.data?.name);
+        }
+      }
+    });
+  }
+
+  /**
+   * Installs an update from a file
+   */
+  async installUpdate(fileName: string): Promise<void> {
+    try {
+      const filePath = `${RNFS.DownloadDirectoryPath}/${fileName}`;
+      if (Platform.OS === 'android') {
+        const fileExists = await RNFS.exists(filePath);
+        if (fileExists) {
+          ToastAndroid.show('Installing update...', ToastAndroid.LONG);
+          await RNFS.installApk(filePath);
+        } else {
+          ToastAndroid.show('Update file not found!', ToastAndroid.LONG);
+        }
+      } else {
+        // Handle iOS install logic if needed
+        ToastAndroid.show('Update install not supported on iOS', ToastAndroid.LONG);
+      }
+    } catch (error) {
+      ToastAndroid.show(`Failed to install update: ${error.message}`, ToastAndroid.LONG);
+      console.error('Install update error:', error);
+    }
   }
 
   /**

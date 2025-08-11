@@ -6,242 +6,41 @@ import {
   TouchableOpacity,
   ToastAndroid,
   StatusBar,
-  TextInput,
-  Platform,
 } from 'react-native';
-import React, {useState, useEffect} from 'react';
+import React, {useState} from 'react';
 import {settingsStorage} from '../../lib/storage';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useThemeStore from '../../lib/zustand/themeStore';
 import {Dropdown} from 'react-native-element-dropdown';
 import {themes} from '../../lib/constants';
-// import LinearGradient from 'react-native-linear-gradient'; // Removed as it's no longer used in this component
-
-// --- Utility functions for HSL <-> Hex conversions ---
-// These are kept as they might be used by the theme store or other parts
-// that convert between HSL and Hex for internal logic.
-const hslToRgb = (h: number, s: number, l: number) => {
-  s /= 100;
-  l /= 100;
-
-  let c = (1 - Math.abs(2 * l - 1)) * s,
-    x = c * (1 - Math.abs(((h / 60) % 2) - 1)),
-    m = l - c / 2,
-    r = 0,
-    g = 0,
-    b = 0;
-
-  if (0 <= h && h < 60) {
-    r = c;
-    g = x;
-    b = 0;
-  } else if (60 <= h && h < 120) {
-    r = x;
-    g = c;
-    b = 0;
-  } else if (120 <= h && h < 180) {
-    r = 0;
-    g = c;
-    b = x;
-  } else if (180 <= h && h < 240) {
-    r = 0;
-    g = x;
-    b = c;
-  } else if (240 <= h && h < 300) {
-    r = x;
-    g = 0;
-    b = c;
-  } else if (300 <= h && h < 360) {
-    r = c;
-    g = 0;
-    b = x;
+import {TextInput} from 'react-native';
+import Constants from 'expo-constants';
+// Lazy-load Firebase to allow running without google-services.json
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const getAnalytics = (): any | null => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('@react-native-firebase/analytics').default;
+  } catch {
+    return null;
   }
-  r = Math.round((r + m) * 255);
-  g = Math.round((g + m) * 255);
-  b = Math.round((b + m) * 255);
-
-  return [r, g, b];
 };
-
-const rgbToHex = (r: number, g: number, b: number) => {
-  return (
-    '#' +
-    ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase()
-  );
-};
-
-const hslToHexCombined = (h: number, s: number, l: number) => {
-  const [r, g, b] = hslToRgb(h, s, l);
-  return rgbToHex(r, g, b);
-};
-
-const hexToRgb = (hex: string) => {
-  if (!hex || !/^#([0-9A-Fa-f]{3}){1,2}$/.test(hex)) {
-    return [0, 0, 0];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const getCrashlytics = (): any | null => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('@react-native-firebase/crashlytics').default;
+  } catch {
+    return null;
   }
-  const bigint = parseInt(hex.slice(1), 16);
-  const r = (bigint >> 16) & 255;
-  const g = (bigint >> 8) & 255;
-  const b = bigint & 255;
-  return [r, g, b];
-};
-
-const rgbToHsl = (r: number, g: number, b: number) => {
-  r /= 255;
-  g /= 255;
-  b /= 255;
-
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  let h,
-    s,
-    l = (max + min) / 2;
-
-  if (max === min) {
-    h = s = 0;
-  } else {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r:
-        h = (g - b) / d + (g < b ? 6 : 0);
-        break;
-      case g:
-        h = (b - r) / d + 2;
-        break;
-      case b:
-        h = (r - g) / d + 4;
-        break;
-    }
-    h /= 6;
-  }
-  return [h * 360, s * 100, l * 100];
-};
-
-const hexToHslCombined = (hex: string) => {
-  if (!hex || !/^#([0-9A-Fa-f]{3}){1,2}$/.test(hex)) {
-    return [0, 100, 50];
-  }
-  const [r, g, b] = hexToRgb(hex);
-  return rgbToHsl(r, g, b);
-};
-
-// --- Theme Preview Component ---
-const ThemePreview = ({primary}) => {
-  return (
-    <View className="p-4 rounded-xl mt-4 bg-[#1A1A1A]">
-      <Text className="text-white text-base font-bold mb-3">Theme Preview</Text>
-      <View className="flex-row items-center justify-between mb-3">
-        <Text className="text-gray-400 text-sm">Example Button</Text>
-        <TouchableOpacity
-          style={{backgroundColor: primary}}
-          className="px-4 py-2 rounded-lg">
-          <Text className="text-white text-sm font-bold">Action</Text>
-        </TouchableOpacity>
-      </View>
-      <View className="flex-row items-center justify-between mb-3">
-        <Text className="text-gray-400 text-sm">Example Text</Text>
-        <Text style={{color: primary}} className="text-sm">
-          Primary Color
-        </Text>
-      </View>
-      <View className="flex-row items-center justify-between">
-        <Text className="text-gray-400 text-sm">Color Swatch</Text>
-        <View
-          style={{
-            backgroundColor: primary,
-            width: 20,
-            height: 20,
-            borderRadius: 10,
-          }}
-        />
-      </View>
-    </View>
-  );
-};
-
-// --- Refactored ThemeCustomizer Component (Sliders Removed) ---
-interface ThemeCustomizerProps {
-  primary: string;
-  setPrimary: (color: string) => void;
-  // isHapticFeedbackEnabled: () => boolean; // Removed as it's no longer used
-}
-
-const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({
-  primary,
-  setPrimary,
-}) => {
-  // State for Hex input
-  const [customHex, setCustomHex] = useState(primary);
-
-  // Effect to update customHex when the external primary color changes
-  // This happens when a new theme is selected from the dropdown
-  useEffect(() => {
-    if (primary && primary.toUpperCase() !== customHex.toUpperCase()) {
-      setCustomHex(primary);
-    }
-  }, [primary]);
-
-  // Function to handle hex input change
-  const handleHexChange = (text: string) => {
-    setCustomHex(text.toUpperCase());
-    const hexRegex = /^#([0-9A-Fa-f]{3}){1,2}$/;
-    if (hexRegex.test(text)) {
-      setPrimary(text.toUpperCase());
-      settingsStorage.setCustomColor(text.toUpperCase()); // Apply changes live
-    }
-  };
-
-  return (
-    <View className="p-4 border-b border-[#262626]">
-      <Text className="text-white text-base mb-3">Customize Color</Text>
-
-      {/* Hex Input Field */}
-      <View className="mb-4">
-        <Text className="text-gray-400 text-sm mb-2">Hex Value</Text>
-        <TextInput
-          className="text-white text-base px-4 py-3 rounded-lg"
-          style={{
-            backgroundColor: '#262626',
-            borderColor: /^#([0-9A-Fa-f]{3}){1,2}$/.test(customHex)
-              ? primary
-              : 'gray',
-            borderWidth: 1,
-          }}
-          placeholder="e.g., #FF6347"
-          placeholderTextColor="gray"
-          value={customHex}
-          onChangeText={handleHexChange}
-        />
-      </View>
-
-      {/* Chosen Color Display */}
-      <View className="mt-4 flex-row items-center justify-between">
-        <Text className="text-white text-base">Current Color</Text>
-        <View
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 15,
-            backgroundColor: primary,
-            borderWidth: 1,
-            borderColor: '#3A3A3A',
-          }}
-        />
-      </View>
-    </View>
-  );
 };
 
 const Preferences = () => {
-  const {primary, setPrimary, isCustom, setCustom} = useThemeStore(state => ({
-    primary: state.primary,
-    setPrimary: state.setPrimary,
-    isCustom: state.isCustom,
-    setCustom: state.setCustom,
-  }));
-
+  const hasFirebase = Boolean(Constants?.expoConfig?.extra?.hasFirebase);
+  const {primary, setPrimary, isCustom, setCustom} = useThemeStore(
+    state => state,
+  );
   const [showRecentlyWatched, setShowRecentlyWatched] = useState(
     settingsStorage.getBool('showRecentlyWatched') || false,
   );
@@ -249,44 +48,52 @@ const Preferences = () => {
     settingsStorage.getBool('disableDrawer') || false,
   );
 
-  const [ExcludedQualities, setExcludedQualities] = useState<string[]>(
-    settingsStorage.getExcludedQualities() || [],
+  const [ExcludedQualities, setExcludedQualities] = useState(
+    settingsStorage.getExcludedQualities(),
+  );
+
+  const [customColor, setCustomColor] = useState(
+    settingsStorage.getCustomColor(),
   );
 
   const [showMediaControls, setShowMediaControls] = useState<boolean>(
-    settingsStorage.showMediaControls() || false,
+    settingsStorage.showMediaControls(),
   );
 
   const [showHamburgerMenu, setShowHamburgerMenu] = useState<boolean>(
-    settingsStorage.showHamburgerMenu() || false,
+    settingsStorage.showHamburgerMenu(),
   );
 
   const [hideSeekButtons, setHideSeekButtons] = useState<boolean>(
-    settingsStorage.hideSeekButtons() || false,
+    settingsStorage.hideSeekButtons(),
   );
 
-  const [enable2xGesture, setEnable2xGesture] = useState<boolean>(
-    settingsStorage.isEnable2xGestureEnabled() || false,
+  const [_enable2xGesture, _setEnable2xGesture] = useState<boolean>(
+    settingsStorage.isEnable2xGestureEnabled(),
   );
 
   const [enableSwipeGesture, setEnableSwipeGesture] = useState<boolean>(
-    settingsStorage.isSwipeGestureEnabled() || false,
+    settingsStorage.isSwipeGestureEnabled(),
   );
 
   const [showTabBarLables, setShowTabBarLables] = useState<boolean>(
-    settingsStorage.showTabBarLabels() || false,
+    settingsStorage.showTabBarLabels(),
   );
 
   const [OpenExternalPlayer, setOpenExternalPlayer] = useState(
-    settingsStorage.getBool('useExternalPlayer', false) || false,
+    settingsStorage.getBool('useExternalPlayer', false),
   );
 
   const [hapticFeedback, setHapticFeedback] = useState(
-    settingsStorage.isHapticFeedbackEnabled() || false,
+    settingsStorage.isHapticFeedbackEnabled(),
   );
 
   const [alwaysUseExternalDownload, setAlwaysUseExternalDownload] = useState(
     settingsStorage.getBool('alwaysExternalDownloader') || false,
+  );
+
+  const [telemetryOptIn, setTelemetryOptIn] = useState<boolean>(
+    settingsStorage.isTelemetryOptIn(),
   );
 
   return (
@@ -298,67 +105,94 @@ const Preferences = () => {
       <View className="p-5">
         <Text className="text-2xl font-bold text-white mb-6">Preferences</Text>
 
-        {/* --- Theme Section: Refactored and Improved UI --- */}
+        {/* Theme Section */}
         <View className="mb-6">
           <Text className="text-gray-400 text-sm mb-3">Appearance</Text>
           <View className="bg-[#1A1A1A] rounded-xl overflow-hidden">
-            {/* Theme Selector Dropdown */}
+            {/* Theme Selector */}
             <View className="flex-row items-center px-4 justify-between p-4 border-b border-[#262626]">
               <Text className="text-white text-base">Theme</Text>
               <View className="w-36">
-                <Dropdown
-                  selectedTextStyle={{
-                    color: 'white',
-                    fontSize: 14,
-                    fontWeight: '500',
-                  }}
-                  containerStyle={{
-                    backgroundColor: '#262626',
-                    borderRadius: 8,
-                    borderWidth: 0,
-                    marginTop: 4,
-                  }}
-                  itemTextStyle={{color: 'white'}}
-                  activeColor="#3A3A3A"
-                  itemContainerStyle={{
-                    backgroundColor: '#262626',
-                    borderWidth: 0,
-                  }}
-                  style={{
-                    backgroundColor: '#262626',
-                    borderWidth: 0,
-                  }}
-                  iconStyle={{tintColor: 'white'}}
-                  placeholderStyle={{color: 'white'}}
-                  labelField="name"
-                  valueField="color"
-                  data={themes}
-                  value={isCustom ? 'custom' : primary}
-                  onChange={value => {
-                    if (value.name === 'Custom') {
-                      setCustom(true);
-                      const initialCustom =
-                        settingsStorage.getCustomColor() || '#FF6347';
-                      setPrimary(initialCustom);
-                      return;
-                    }
-                    setCustom(false);
-                    setPrimary(value.color);
-                    settingsStorage.setCustomColor(value.color);
-                  }}
-                />
+                {isCustom ? (
+                  <View className="flex-row items-center gap-2">
+                    <TextInput
+                      style={{
+                        color: 'white',
+                        backgroundColor: '#262626',
+                        borderRadius: 8,
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        fontSize: 14,
+                      }}
+                      placeholder="Hex Color"
+                      placeholderTextColor="gray"
+                      value={customColor}
+                      onChangeText={setCustomColor}
+                      onSubmitEditing={e => {
+                        if (e.nativeEvent.text.length < 7) {
+                          ToastAndroid.show(
+                            'Invalid Color',
+                            ToastAndroid.SHORT,
+                          );
+                          return;
+                        }
+                        settingsStorage.setCustomColor(e.nativeEvent.text);
+                        setPrimary(e.nativeEvent.text);
+                      }}
+                    />
+                    <TouchableOpacity
+                      onPress={() => {
+                        setCustom(false);
+                        setPrimary('#FF6347');
+                      }}>
+                      <MaterialCommunityIcons
+                        name="close"
+                        size={20}
+                        color="gray"
+                      />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <Dropdown
+                    selectedTextStyle={{
+                      color: 'white',
+                      fontSize: 14,
+                      fontWeight: '500',
+                    }}
+                    containerStyle={{
+                      backgroundColor: '#262626',
+                      borderRadius: 8,
+                      borderWidth: 0,
+                      marginTop: 4,
+                    }}
+                    itemTextStyle={{color: 'white'}}
+                    activeColor="#3A3A3A"
+                    itemContainerStyle={{
+                      backgroundColor: '#262626',
+                      borderWidth: 0,
+                    }}
+                    style={{
+                      backgroundColor: '#262626',
+                      borderWidth: 0,
+                    }}
+                    iconStyle={{tintColor: 'white'}}
+                    placeholderStyle={{color: 'white'}}
+                    labelField="name"
+                    valueField="color"
+                    data={themes}
+                    value={primary}
+                    onChange={value => {
+                      if (value.name === 'Custom') {
+                        setCustom(true);
+                        setPrimary(customColor);
+                        return;
+                      }
+                      setPrimary(value.color);
+                    }}
+                  />
+                )}
               </View>
             </View>
-
-            {/* HSL Color Picker UI - visible only when isCustom is true */}
-            {isCustom && (
-              <>
-                <ThemeCustomizer primary={primary} setPrimary={setPrimary} />
-                <View className="p-4 border-b border-[#262626]">
-                  <ThemePreview primary={primary} />
-                </View>
-              </>
-            )}
 
             {/* Haptic Feedback */}
             <View className="flex-row items-center justify-between p-4 border-b border-[#262626]">
@@ -373,6 +207,44 @@ const Preferences = () => {
               />
             </View>
 
+            {/* Analytics & Crashlytics Opt-In */}
+            <View className="flex-row items-center justify-between p-4 border-b border-[#262626]">
+              <Text className="text-white text-base">
+                Usage & Crash Reports
+              </Text>
+              <Switch
+                thumbColor={telemetryOptIn ? primary : 'gray'}
+                value={telemetryOptIn}
+                onValueChange={async () => {
+                  const next = !telemetryOptIn;
+                  setTelemetryOptIn(next);
+                  settingsStorage.setTelemetryOptIn(next);
+                  if (hasFirebase) {
+                    try {
+                      const crashlytics = getCrashlytics();
+                      crashlytics &&
+                        (await crashlytics().setCrashlyticsCollectionEnabled(
+                          next,
+                        ));
+                    } catch {}
+                    try {
+                      const analytics = getAnalytics();
+                      analytics &&
+                        (await analytics().setAnalyticsCollectionEnabled(next));
+                      // Also update consent for completeness
+                      analytics &&
+                        (await analytics().setConsent({
+                          analytics_storage: next,
+                          ad_storage: next,
+                          ad_user_data: next,
+                          ad_personalization: next,
+                        }));
+                    } catch {}
+                  }
+                }}
+              />
+            </View>
+
             {/* Show Tab Bar Labels */}
             <View className="flex-row items-center justify-between p-4 border-b border-[#262626]">
               <Text className="text-white text-base">Show Tab Bar Labels</Text>
@@ -382,17 +254,10 @@ const Preferences = () => {
                 onValueChange={() => {
                   settingsStorage.setShowTabBarLabels(!showTabBarLables);
                   setShowTabBarLables(!showTabBarLables);
-                  // Use a platform check and try-catch for maximum safety
-                  if (Platform.OS === 'android') {
-                    try {
-                      ToastAndroid.show(
-                        'Restart App to Apply Changes',
-                        ToastAndroid.SHORT,
-                      );
-                    } catch (e) {
-                      console.error('Failed to show ToastAndroid:', e);
-                    }
-                  }
+                  ToastAndroid.show(
+                    'Restart App to Apply Changes',
+                    ToastAndroid.SHORT,
+                  );
                 }}
               />
             </View>
