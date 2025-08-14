@@ -1,4 +1,4 @@
-import 'react-native-reanimated'; // Ensure this import is at the top
+import 'react-native-reanimated';
 import React, {useEffect} from 'react';
 import Home from './screens/home/Home';
 import Info from './screens/home/Info';
@@ -15,11 +15,11 @@ import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Entypo from '@expo/vector-icons/Entypo';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import 'react-native-gesture-handler';
 import WebView from './screens/WebView';
 import SearchResults from './screens/SearchResults';
 import * as SystemUI from 'expo-system-ui';
-// import DisableProviders from './screens/settings/DisableProviders';
 import About, {checkForUpdate} from './screens/settings/About';
 import BootSplash from 'react-native-bootsplash';
 import {enableFreeze, enableScreens} from 'react-native-screens';
@@ -53,11 +53,12 @@ import {
   requestAppInstallPermission,
 } from 'react-native-install-unknown-apps';
 import {Linking} from 'react-native';
-
-// Import the new VegaMusicStack component, assuming it's in a separate file
 import VegaMusicHome from './screens/music/VegaMusicHome';
 import VegaSettings from './screens/music/VegaSettings';
+import LiveTVScreen from './screens/tv/LiveTVScreen';
+import TVPlayerScreen from './screens/tv/TVPlayerScreen';
 import useAppModeStore from './lib/zustand/appModeStore';
+import VegaTVSettingsScreen from './screens/tv/VegaTVSettingsScreen';
 
 enableScreens(true);
 enableFreeze(true);
@@ -74,29 +75,38 @@ export type HomeStackParamList = {
     isSearch?: boolean;
   };
   GenreList: {
-    // New screen type for genre navigation
     filter: string;
     title?: string;
     providerValue?: string;
-    genre: string; // The genre is a required parameter for this screen
+    genre: string;
   };
   Webview: {link: string};
 };
 
-// Define the stack for music-related screens
 export type VegaMusicStackParamList = {
   VegaMusicHome: undefined;
   VegaSettings: undefined;
   VegaMusicSearch: undefined;
 };
 
+export type VegaTVStackParamList = {
+  LiveTVScreen: undefined;
+  TVPlayerScreen: {streamUrl: string};
+  VegaTVSettingsScreen: undefined;
+};
+
 export type MusicRootStackParamList = {
   VegaMusicStack: NavigatorScreenParams<VegaMusicStackParamList>;
+};
+
+export type TVRootStackParamList = {
+  VegaTVStack: NavigatorScreenParams<VegaTVStackParamList>;
 };
 
 export type RootStackParamList = {
   TabStack: NavigatorScreenParams<TabStackParamList>;
   MusicRootStack: NavigatorScreenParams<MusicRootStackParamList>;
+  TVRootStack: NavigatorScreenParams<TVRootStackParamList>;
   Player: {
     linkIndex: number;
     episodeList: EpisodeLink[];
@@ -125,7 +135,6 @@ export type SearchStackParamList = {
     isSearch?: boolean;
   };
   GenreList: {
-    // New screen type for genre navigation
     filter: string;
     title?: string;
     providerValue?: string;
@@ -178,11 +187,10 @@ const SettingsStack = createNativeStackNavigator<SettingsStackParamList>();
 const WatchHistoryStack =
   createNativeStackNavigator<WatchHistoryStackParamList>();
 const MusicRootStack = createNativeStackNavigator<MusicRootStackParamList>();
-const VegaMusicStack = createNativeStackNavigator<VegaMusicStackParamList>(); // Define the VegaMusicStack navigator
+const VegaMusicStack = createNativeStackNavigator<VegaMusicStackParamList>();
+const TVRootStack = createNativeStackNavigator<TVRootStackParamList>();
+const VegaTVStack = createNativeStackNavigator<VegaTVStackParamList>();
 
-/** * Stack navigator for the Home tab.
- * Contains screens for the main Home view, movie/series info, and lists.
- */
 function HomeStackScreen() {
   return (
     <HomeStack.Navigator
@@ -195,16 +203,12 @@ function HomeStackScreen() {
       <HomeStack.Screen name="Home" component={Home} />
       <HomeStack.Screen name="Info" component={Info} />
       <HomeStack.Screen name="ScrollList" component={ScrollList} />
-      {/* ADDED: New screen for GenreList, using the ScrollList component */}
       <HomeStack.Screen name="GenreList" component={ScrollList} />
       <HomeStack.Screen name="Webview" component={WebView} />
     </HomeStack.Navigator>
   );
 }
 
-/** * Stack navigator for the Search tab.
- * Contains screens for the search bar, search results, and info pages.
- */
 function SearchStackScreen() {
   return (
     <SearchStack.Navigator
@@ -216,7 +220,6 @@ function SearchStackScreen() {
       }}>
       <SearchStack.Screen name="Search" component={Search} />
       <SearchStack.Screen name="ScrollList" component={ScrollList} />
-      {/* ADDED: New screen for GenreList, using the ScrollList component */}
       <SearchStack.Screen name="GenreList" component={ScrollList} />
       <SearchStack.Screen name="Info" component={Info} />
       <SearchStack.Screen name="SearchResults" component={SearchResults} />
@@ -225,9 +228,6 @@ function SearchStackScreen() {
   );
 }
 
-/** * Stack navigator for the Watch List tab.
- * Contains screens for the user's watch list and item info pages.
- */
 function WatchListStackScreen() {
   return (
     <WatchListStack.Navigator
@@ -243,9 +243,6 @@ function WatchListStackScreen() {
   );
 }
 
-/** * Stack navigator for the Watch History screen, nested inside Settings.
- * This handles the navigation flow for the user's viewing history.
- */
 function WatchHistoryStackScreen() {
   return (
     <WatchHistoryStack.Navigator
@@ -265,9 +262,6 @@ function WatchHistoryStackScreen() {
   );
 }
 
-/** * Stack navigator for the Settings tab.
- * Contains all the settings-related screens.
- */
 function SettingsStackScreen() {
   return (
     <SettingsStack.Navigator
@@ -278,8 +272,6 @@ function SettingsStackScreen() {
         freezeOnBlur: true,
       }}>
       <SettingsStack.Screen name="Settings" component={Settings} />
-      {/* The DisableProviders screen is currently commented out in the original code. */}
-      {/* <SettingsStack.Screen name="DisableProviders" component={DisableProviders} /> */}
       <SettingsStack.Screen name="About" component={About} />
       <SettingsStack.Screen name="Preferences" component={Preferences} />
       <SettingsStack.Screen name="Downloads" component={Downloads} />
@@ -296,10 +288,6 @@ function SettingsStackScreen() {
   );
 }
 
-/**
- * Stack navigator for the Music Mode.
- * This is where music-specific screens are defined.
- */
 function VegaMusicStackNavigator() {
   return (
     <VegaMusicStack.Navigator
@@ -315,9 +303,25 @@ function VegaMusicStackNavigator() {
   );
 }
 
-/** * The main Bottom Tab navigator.
- * This is the primary navigation for the video app mode.
- */
+function VegaTVStackNavigator() {
+  return (
+    <VegaTVStack.Navigator
+      screenOptions={{
+        headerShown: false,
+        animation: 'ios_from_right',
+        animationDuration: 200,
+        freezeOnBlur: true,
+      }}>
+      <VegaTVStack.Screen name="LiveTVScreen" component={LiveTVScreen} />
+      <VegaTVStack.Screen name="TVPlayerScreen" component={TVPlayerScreen} />
+      <VegaTVStack.Screen
+        name="VegaTVSettingsScreen"
+        component={VegaTVSettingsScreen}
+      />
+    </VegaTVStack.Navigator>
+  );
+}
+
 function TabStackScreen() {
   const {primary} = useThemeStore(state => state);
   const showTabBarLables = settingsStorage.showTabBarLabels();
@@ -351,7 +355,6 @@ function TabStackScreen() {
           : {},
         tabBarBackground: () => <TabBarBackgound />,
         tabBarHideOnKeyboard: true,
-        // Custom TabBarButton to handle haptic feedback
         tabBarButton: props => {
           return (
             <TouchableOpacity
@@ -443,9 +446,6 @@ function TabStackScreen() {
   );
 }
 
-/** * The main stack navigator for the music app mode.
- * It uses the VegaMusicStack component for its navigation.
- */
 function MusicRootStackScreen() {
   return (
     <MusicRootStack.Navigator
@@ -456,12 +456,26 @@ function MusicRootStackScreen() {
         freezeOnBlur: true,
         contentStyle: {backgroundColor: 'transparent'},
       }}>
-      {/* Correctly using the imported component with the correct name */}
       <MusicRootStack.Screen
         name="VegaMusicStack"
         component={VegaMusicStackNavigator}
       />
     </MusicRootStack.Navigator>
+  );
+}
+
+function TVRootStackScreen() {
+  return (
+    <TVRootStack.Navigator
+      screenOptions={{
+        headerShown: false,
+        animation: 'ios_from_right',
+        animationDuration: 200,
+        freezeOnBlur: true,
+        contentStyle: {backgroundColor: 'transparent'},
+      }}>
+      <TVRootStack.Screen name="VegaTVStack" component={VegaTVStackNavigator} />
+    </TVRootStack.Navigator>
   );
 }
 
@@ -472,13 +486,10 @@ const App = () => {
   ]);
 
   const {primary} = useThemeStore(state => state);
-  // Get appMode from the Zustand store
   const {appMode} = useAppModeStore(state => state);
 
   SystemUI.setBackgroundColorAsync('black');
 
-  /** * Action handler for notifee foreground events, such as download cancellation.
-   */
   async function actionHandler({
     type,
     detail,
@@ -486,7 +497,6 @@ const App = () => {
     type: EventType;
     detail: EventDetail;
   }) {
-    // Handle download cancellation
     if (
       type === EventType.ACTION_PRESS &&
       detail.pressAction?.id === detail.notification?.data?.fileName
@@ -510,7 +520,6 @@ const App = () => {
       }
     }
 
-    // Handle app update installation
     if (type === EventType.PRESS && detail.pressAction?.id === 'install') {
       const res = await RNFS.exists(
         `${RNFS.DownloadDirectoryPath}/${detail.notification?.data?.name}`,
@@ -528,7 +537,6 @@ const App = () => {
     }
   }
 
-  // Effect to listen for foreground notification events
   useEffect(() => {
     const unsubscribe = notifee.onForegroundEvent(({type, detail}) => {
       actionHandler({type, detail});
@@ -538,7 +546,6 @@ const App = () => {
     };
   }, []);
 
-  // Effect to handle automatic provider updates
   useEffect(() => {
     updateProvidersService.startAutomaticUpdateCheck();
     return () => {
@@ -546,7 +553,6 @@ const App = () => {
     };
   }, []);
 
-  // Effect to check for app updates on startup
   useEffect(() => {
     if (settingsStorage.isAutoCheckUpdateEnabled()) {
       checkForUpdate(() => {}, settingsStorage.isAutoDownloadEnabled(), false);
@@ -605,13 +611,17 @@ const App = () => {
                   freezeOnBlur: true,
                   contentStyle: {backgroundColor: 'transparent'},
                 }}>
-                {/* Conditionally render the main app based on appMode */}
                 {appMode === 'video' ? (
                   <Stack.Screen name="TabStack" component={TabStackScreen} />
-                ) : (
+                ) : appMode === 'music' ? (
                   <Stack.Screen
                     name="MusicRootStack"
                     component={MusicRootStackScreen}
+                  />
+                ) : (
+                  <Stack.Screen
+                    name="TVRootStack"
+                    component={TVRootStackScreen}
                   />
                 )}
                 <Stack.Screen

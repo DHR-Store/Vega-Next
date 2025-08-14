@@ -1,6 +1,6 @@
 {
-  "name": "vega",
-  "version": "3.2.6",
+  "name": "vega-next",
+  "version": "3.2.7",
   "private": true,
   "scripts": {
     "android": "expo run:android",
@@ -25,8 +25,6 @@
     "@gorhom/bottom-sheet": "^4.6.4",
     "@notifee/react-native": "^9.1.8",
     "@react-native-community/blur": "^4.4.1",
-    "@react-native-firebase/app": "^22.4.0",
-    "@react-native-firebase/messaging": "^22.4.0",
     "@react-navigation/bottom-tabs": "^7.4.2",
     "@react-navigation/native": "^7.1.17",
     "@react-navigation/native-stack": "^7.3.24",
@@ -41,12 +39,15 @@
     "expo-blur": "~14.0.3",
     "expo-brightness": "~13.0.3",
     "expo-build-properties": "~0.13.3",
+    "expo-clipboard": "~7.0.1",
     "expo-crypto": "~14.0.2",
     "expo-document-picker": "~13.0.3",
     "expo-intent-launcher": "~12.0.2",
     "expo-linear-gradient": "~14.0.2",
+    "expo-notifications": "~0.29.14",
     "expo-status-bar": "~2.0.1",
     "expo-system-ui": "~4.0.9",
+    "expo-task-manager": "~12.0.6",
     "expo-updates": "~0.27.4",
     "expo-video-thumbnails": "~9.0.3",
     "moti": "^0.28.1",
@@ -74,9 +75,7 @@
     "react-native-video": "^6.11.0",
     "react-native-volume-manager": "^2.0.8",
     "react-native-webview": "^13.12.5",
-    "zustand": "^4.5.2",
-    "expo-notifications": "~0.29.14",
-    "expo-task-manager": "~12.0.6"
+    "zustand": "^4.5.2"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

@@ -6,9 +6,9 @@ import {
   TouchableNativeFeedback,
   ScrollView,
   Dimensions,
-  Switch, // Import Switch
+  Switch,
 } from 'react-native';
-import React, { useCallback, useMemo } from 'react';
+import React, {useCallback, useMemo} from 'react';
 import {
   settingsStorage,
   cacheStorageService,
@@ -16,12 +16,12 @@ import {
 } from '../../lib/storage';
 import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useContentStore from '../../lib/zustand/contentStore';
-import { socialLinks } from '../../lib/constants';
+import {socialLinks} from '../../lib/constants';
 import {
   NativeStackScreenProps,
   NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
-import { SettingsStackParamList, TabStackParamList } from '../../App'; // Keep existing imports
+import {SettingsStackParamList, TabStackParamList} from '../../App';
 import {
   MaterialCommunityIcons,
   AntDesign,
@@ -30,37 +30,34 @@ import {
 } from '@expo/vector-icons';
 import useThemeStore from '../../lib/zustand/themeStore';
 import useWatchHistoryStore from '../../lib/zustand/watchHistrory';
-import Animated, { FadeInDown, FadeInUp, Layout } from 'react-native-reanimated';
-import { useNavigation } from '@react-navigation/native';
+import Animated, {FadeInDown, FadeInUp, Layout} from 'react-native-reanimated';
+import {useNavigation} from '@react-navigation/native';
 
 import RenderProviderFlagIcon from '../../components/RenderProviderFLagIcon';
-import useAppModeStore from '../../lib/zustand/appModeStore'; // Import the new store
+import useAppModeStore from '../../lib/zustand/appModeStore';
 
 type Props = NativeStackScreenProps<SettingsStackParamList, 'Settings'>;
 
-const Settings = ({ navigation }: Props) => {
+const Settings = ({navigation}: Props) => {
   const tabNavigation =
     useNavigation<NativeStackNavigationProp<TabStackParamList>>();
-  const { primary } = useThemeStore(state => state);
-  const { provider, setProvider, installedProviders } = useContentStore(
+  const {primary} = useThemeStore(state => state);
+  const {provider, setProvider, installedProviders} = useContentStore(
     state => state,
   );
-  const { clearHistory } = useWatchHistoryStore(state => state);
-  const { appMode, setAppMode } = useAppModeStore(state => state); // Get appMode and setAppMode
+  const {clearHistory} = useWatchHistoryStore(state => state);
+  const {appMode, setAppMode} = useAppModeStore(state => state);
 
   const handleProviderSelect = useCallback(
     (item: ProviderExtension) => {
       setProvider(item);
-      // When a video provider is selected, ensure appMode is 'video'
       setAppMode('video');
-      // Add haptic feedback
       if (settingsStorage.isHapticFeedbackEnabled()) {
         ReactNativeHapticFeedback.trigger('virtualKey', {
           enableVibrateFallback: true,
           ignoreAndroidSystemSettings: false,
         });
       }
-      // Navigate to home screen of the video app
       tabNavigation.navigate('HomeStack');
     },
     [setProvider, tabNavigation, setAppMode],
@@ -71,11 +68,12 @@ const Settings = ({ navigation }: Props) => {
       <TouchableOpacity
         key={item.value}
         onPress={() => handleProviderSelect(item)}
-        className={`mr-3 rounded-lg ${isSelected ? 'bg-[#333333]' : 'bg-[#262626]'
-          }`}
+        className={`mr-3 rounded-lg ${
+          isSelected ? 'bg-[#333333]' : 'bg-[#262626]'
+        }`}
         style={{
-          width: Dimensions.get('window').width * 0.3, // Shows 2.5 items
-          height: 65, // Increased height
+          width: Dimensions.get('window').width * 0.3,
+          height: 65,
           borderWidth: 1.5,
           borderColor: isSelected ? primary : '#333333',
         }}>
@@ -87,7 +85,7 @@ const Settings = ({ navigation }: Props) => {
             {item.display_name}
           </Text>
           {isSelected && (
-            <Text style={{ position: 'absolute', top: 6, right: 6 }}>
+            <Text style={{position: 'absolute', top: 6, right: 6}}>
               <MaterialIcons name="check-circle" size={16} color={primary} />
             </Text>
           )}
@@ -162,7 +160,8 @@ const Settings = ({ navigation }: Props) => {
           <View className="mb-6 flex-col gap-3">
             <Text className="text-gray-400 text-sm mb-1">App Mode</Text>
             <View className="bg-[#1A1A1A] rounded-xl overflow-hidden">
-              <View className="flex-row items-center justify-between p-4">
+              {/* Vega-Music Mode Switch */}
+              <View className="flex-row items-center justify-between p-4 border-b border-[#262626]">
                 <View className="flex-row items-center">
                   <MaterialCommunityIcons
                     name="application"
@@ -174,7 +173,7 @@ const Settings = ({ navigation }: Props) => {
                   </Text>
                 </View>
                 <Switch
-                  trackColor={{ false: '#767577', true: primary }}
+                  trackColor={{false: '#767577', true: primary}}
                   thumbColor={appMode === 'music' ? '#f4f3f4' : '#f4f3f4'}
                   ios_backgroundColor="#3e3e3e"
                   onValueChange={() => {
@@ -186,8 +185,6 @@ const Settings = ({ navigation }: Props) => {
                         ignoreAndroidSystemSettings: false,
                       });
                     }
-                    // If switching to music, the root navigator will change automatically.
-                    // If switching back to video, navigate to HomeStack to reset the view.
                     if (newMode === 'video') {
                       tabNavigation.navigate('HomeStack');
                     }
@@ -195,16 +192,49 @@ const Settings = ({ navigation }: Props) => {
                   value={appMode === 'music'}
                 />
               </View>
+
+              {/* Vega-TV Mode Switch */}
+              <View className="flex-row items-center justify-between p-4">
+                <View className="flex-row items-center">
+                  <MaterialCommunityIcons
+                    name="television-play" // New icon for TV
+                    size={22}
+                    color={primary}
+                  />
+                  <Text className="text-white ml-3 text-base">
+                    Vega-TV Mode
+                  </Text>
+                </View>
+                <Switch
+                  trackColor={{false: '#767577', true: primary}}
+                  thumbColor={appMode === 'vegaTv' ? '#f4f3f4' : '#f4f3f4'}
+                  ios_backgroundColor="#3e3e3e"
+                  onValueChange={() => {
+                    setAppMode('vegaTv');
+                    if (settingsStorage.isHapticFeedbackEnabled()) {
+                      ReactNativeHapticFeedback.trigger('impactLight', {
+                        enableVibrateFallback: true,
+                        ignoreAndroidSystemSettings: false,
+                      });
+                    }
+                    // Navigate to your new VegaTV screen
+                    // This assumes you have a new 'VegaTVStack' in your navigator
+                    tabNavigation.navigate('VegaTVStack');
+                  }}
+                  value={appMode === 'vegaTv'}
+                />
+              </View>
             </View>
           </View>
         </AnimatedSection>
-
 
         {/* Content provider section (only visible in video mode) */}
         {appMode === 'video' && (
           <AnimatedSection delay={100}>
             <View className="mb-6 flex-col gap-3">
-              <Text className="text-gray-400 text-sm mb-1">Content Provider</Text>
+              <Text className="text-gray-400 text-sm mb-1">
+                Content Provider
+              </Text>
               <View className="bg-[#1A1A1A] rounded-xl py-4">
                 <ScrollView
                   horizontal
@@ -243,7 +273,6 @@ const Settings = ({ navigation }: Props) => {
             </View>
           </AnimatedSection>
         )}
-
 
         {/* Main options section */}
         <AnimatedSection delay={200}>
@@ -387,7 +416,9 @@ const Settings = ({ navigation }: Props) => {
 
               {/* GitHub */}
               <TouchableNativeFeedback
-                onPress={() => Linking.openURL('https://github.com/DHR-Store/Vega-Next')}
+                onPress={() =>
+                  Linking.openURL('https://github.com/DHR-Store/Vega-Next')
+                }
                 background={TouchableNativeFeedback.Ripple('#333333', false)}>
                 <View className="flex-row items-center justify-between p-4 border-b border-[#262626]">
                   <View className="flex-row items-center">
@@ -402,7 +433,9 @@ const Settings = ({ navigation }: Props) => {
 
               {/* sponsore */}
               <TouchableNativeFeedback
-                onPress={() => Linking.openURL('https://github.com/DHR-Store/Vega-Next')}
+                onPress={() =>
+                  Linking.openURL('https://github.com/DHR-Store/Vega-Next')
+                }
                 background={TouchableNativeFeedback.Ripple('#333333', false)}>
                 <View className="flex-row items-center justify-between p-4">
                   <View className="flex-row items-center">

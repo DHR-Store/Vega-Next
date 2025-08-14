@@ -6,21 +6,32 @@ import {
   Switch,
   TouchableOpacity,
 } from 'react-native';
-import React, {useState} from 'react';
+import React, {useState, useEffect} from 'react';
 import {providersStorage} from '../../lib/storage';
 import {providersList} from '../../lib/constants';
 import useThemeStore from '../../lib/zustand/themeStore';
 import {SvgUri} from 'react-native-svg';
 
+// Define a type for the provider object for better type safety
+interface Provider {
+  value: string;
+  name: string;
+  flag: string;
+  type?: string;
+}
+
 const DisableProviders = () => {
   const {primary} = useThemeStore(state => state);
-  const [disabledProviders, setDisabledProviders] = useState<string[]>(
-    providersStorage.getDisabledProviders(),
-  );
+  const [disabledProviders, setDisabledProviders] = useState<string[]>([]);
+
+  // Use useEffect to load the disabled providers list on component mount
+  useEffect(() => {
+    setDisabledProviders(providersStorage.getDisabledProviders());
+  }, []);
 
   const toggleProvider = (providerId: string) => {
     const newDisabled = providersStorage.toggleProvider(providerId);
-    setDisabledProviders(newDisabled);
+    setDisabledProviders([...newDisabled]); // Spread to ensure state update triggers re-render
   };
 
   const enableAll = () => {
@@ -41,7 +52,7 @@ const DisableProviders = () => {
           </Text>
           <TouchableOpacity
             onPress={enableAll}
-            className="bg-[#262626] px-4 py-2 rounded-lg">
+            className="bg-[#262626] px-4 py-2 rounded-lg active:opacity-70">
             <Text className="text-white text-xs">Enable All</Text>
           </TouchableOpacity>
         </View>
@@ -51,7 +62,7 @@ const DisableProviders = () => {
         </Text>
 
         <View className="bg-[#1A1A1A] rounded-xl overflow-hidden">
-          {providersList.map((provider, index) => (
+          {providersList.map((provider: Provider, index: number) => (
             <View
               key={provider.value}
               className={`flex-row items-center justify-between p-4 ${
@@ -72,8 +83,11 @@ const DisableProviders = () => {
               </View>
               <Switch
                 thumbColor={
-                  !disabledProviders.includes(provider.value) ? primary : 'gray'
+                  !disabledProviders.includes(provider.value)
+                    ? primary
+                    : '#8B8B8B'
                 }
+                trackColor={{false: '#4A4A4A', true: primary}}
                 value={!disabledProviders.includes(provider.value)}
                 onValueChange={() => toggleProvider(provider.value)}
               />

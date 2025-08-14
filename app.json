@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Vega",
-    "displayName": "Vega",
+    "name": "Vega-Next",
+    "displayName": "Vega-Next",
     "newArchEnabled": true,
     "autolinking": {
       "exclude": ["expo-splash-screen"]
@@ -61,14 +61,14 @@
         }
       ]
     ],
-    "slug": "vega",
-    "version": "3.2.4",
+    "slug": "vega-next",
+    "version": "3.2.6",
     "sdkVersion": "52.0.0",
     "userInterfaceStyle": "dark",
     "android": {
       "minSdkVersion": 24,
       "edgeToEdgeEnabled": true,
-      "package": "com.vega",
+      "package": "com.vega.next",
       "versionCode": 145,
       "permissions": [
         "FOREGROUND_SERVICE",
@@ -95,7 +95,7 @@
           "action": "VIEW",
           "category": "BROWSABLE",
           "data": {
-            "scheme": "com.vega"
+            "scheme": "com.vega.next"
           }
         }
       ],

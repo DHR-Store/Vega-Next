@@ -1,3 +1,5 @@
+// my-react-native-app/src/screens/About.js
+
 import {
   View,
   Text,
@@ -7,6 +9,7 @@ import {
   Alert,
   Switch,
   Platform,
+  AppState,
 } from 'react-native';
 import React, {useState, useEffect, useRef} from 'react';
 import {Feather} from '@expo/vector-icons';
@@ -23,31 +26,73 @@ const BACKGROUND_NOTIFICATION_TASK = 'background-notification-task';
 const VERCEL_API_DOMAIN = 'my-update-server-ij9t.vercel.app';
 const LOCAL_API_URL = 'http://localhost:3000';
 
+// Custom hook to detect if the app is in the foreground
+const useIsForeground = () => {
+  const [isForeground, setIsForeground] = useState(true);
+  useEffect(() => {
+    const onChange = state => {
+      setIsForeground(state === 'active');
+    };
+    const subscription = AppState.addEventListener('change', onChange);
+    return () => subscription.remove();
+  }, [setIsForeground]);
+  return isForeground;
+};
+
 // Define the background task to handle silent push notifications
 TaskManager.defineTask(
   BACKGROUND_NOTIFICATION_TASK,
   async ({data, error, executionInfo}) => {
+    console.log('Background task started...');
+    console.log('--- Background Task Payload Received ---');
+    console.log('Execution Info:', JSON.stringify(executionInfo, null, 2));
+    console.log('Data:', JSON.stringify(data, null, 2));
+    console.log('--- End of Background Task Payload ---');
+
+    if (executionInfo?.remoteNotificationPayload?.notification) {
+      console.error(
+        "ERROR: Received a push notification with a 'notification' key. " +
+          'This is not a data-only payload and is likely causing the ' +
+          "' (NOBRIDGE) ERROR [TypeError: _Notification.default.actionHandler is not a function]' error. " +
+          'Please ensure your server sends a data-only payload.',
+      );
+      return;
+    }
+
     if (error) {
       console.error('Background task error:', error);
       return;
     }
 
-    console.log('Received a background notification with data:', data);
-
-    // Get the user's setting from storage to determine if the notification should be shown
-    const showBackgroundNotification =
-      await settingsStorage.isBackgroundNotificationEnabled();
-
-    if (showBackgroundNotification) {
-      // The background task is triggered by a silent push, and we can then
-      // optionally display a local notification based on user settings.
-      Notifications.scheduleNotificationAsync({
-        content: {
-          title: data?.title || 'Background Notification',
-          body: data?.body || 'You have received a new background update.',
-        },
-        trigger: null, // show immediately
-      });
+    try {
+      if (data && data.type === 'update-available') {
+        const {title, body, releaseNotes, version, ...otherData} = data;
+        Notifications.scheduleNotificationAsync({
+          content: {
+            title: title || `New App Update: v${version} is available!`,
+            body: body || releaseNotes,
+            data: {
+              ...otherData,
+              type: 'update',
+            },
+          },
+          trigger: null,
+        });
+        console.log('Update notification scheduled from background task.');
+      } else if (data && data.type === 'message') {
+        const {title, message} = data;
+        Notifications.scheduleNotificationAsync({
+          content: {
+            title: title || 'New Message',
+            body: message || 'You have a new notification!',
+            data: data,
+          },
+          trigger: null,
+        });
+        console.log('Foreground notification scheduled from background task.');
+      }
+    } catch (e) {
+      console.error('Error within background task:', e);
     }
   },
 );
@@ -65,15 +110,14 @@ const downloadUpdate = async (url, name) => {
   console.log('downloading', url, name);
   try {
     if (await RNFS.exists(`${RNFS.DownloadDirectoryPath}/${name}`)) {
-      // Use Expo Notifications directly to display the notification
       Notifications.scheduleNotificationAsync({
         content: {
           id: 'downloadComplete',
-          title: 'Download Completed',
-          body: 'Tap to install',
+          title: `Download of ${name} completed!`,
+          body: 'Tap to install the update.',
           data: {name: `${name}`},
         },
-        trigger: null, // show immediately
+        trigger: null,
       });
       return;
     }
@@ -92,21 +136,17 @@ const downloadUpdate = async (url, name) => {
     },
     progress: res => {
       console.log('progress', res.bytesWritten, res.contentLength);
-      // We will no longer show a progress bar in the notification as it's not supported
-      // out of the box with the basic Notifications API.
-      // We will rely on the default system download notification.
     },
   });
 
   promise
     .then(async res => {
       if (res.statusCode === 200) {
-        // Use Expo Notifications directly to display the notification
         Notifications.scheduleNotificationAsync({
           content: {
             id: 'downloadComplete',
-            title: 'Download Complete',
-            body: 'Tap to install',
+            title: `Download of ${name} complete!`,
+            body: 'Tap to install the update.',
             data: {name},
           },
           trigger: null,
@@ -142,14 +182,13 @@ function compareVersions(localVersion, remoteVersion) {
         return false;
       }
     }
-    return false; // Versions are equal
+    return false;
   } catch (error) {
     console.error('Invalid version format during comparison:', error);
     return false;
   }
 }
 
-// handle check for update
 export const checkForUpdate = async (
   setUpdateLoading,
   autoDownload,
@@ -157,7 +196,6 @@ export const checkForUpdate = async (
 ) => {
   setUpdateLoading(true);
   try {
-    // This is now hardcoded to false
     const useLocalServer = false;
     const apiUrl = useLocalServer
       ? `${LOCAL_API_URL}/api/latest-release`
@@ -172,46 +210,51 @@ export const checkForUpdate = async (
     const remoteVersion = data.version;
 
     if (compareVersions(localVersion || '', remoteVersion)) {
-      // Schedule a background notification to inform the user
-      Notifications.scheduleNotificationAsync({
-        content: {
-          title: `New Update Available: v${remoteVersion}`,
-          body: data.releaseNotes,
-        },
-        trigger: null, // Show immediately
-      });
-
-      // Show an alert to the user with the release notes
       Alert.alert(
-        `Update v${localVersion} -> ${remoteVersion}`,
-        data.releaseNotes,
+        data.title || `Update v${localVersion} -> ${remoteVersion}`,
+        data.body || data.releaseNotes,
         [
           {text: 'Cancel'},
           {
             text: 'Update',
             onPress: () =>
-              autoDownload
-                ? downloadUpdate(
-                    data.downloadUrl.replace(
-                      'https://your-vercel-app-domain.vercel.app',
-                      `https://${VERCEL_API_DOMAIN}`,
-                    ),
-                    data.fileName,
-                  )
-                : Linking.openURL(`https://dhr-store.vercel.app/app2.html`),
+              Linking.openURL(
+                data.downloadUrl.replace(
+                  'https://your-vercel-app-domain.vercel.app',
+                  `https://${VERCEL_API_DOMAIN}`,
+                ),
+              ),
           },
         ],
       );
       console.log(
-        'local version',
+        'An update is available! local version',
         localVersion,
         'remote version',
         remoteVersion,
       );
+
+      Notifications.scheduleNotificationAsync({
+        content: {
+          title:
+            data.title || `New App Update: v${remoteVersion} is available!`,
+          body: data.body || data.releaseNotes,
+          data: {
+            ...data,
+            type: 'update',
+            downloadUrl: data.downloadUrl.replace(
+              'https://your-vercel-app-domain.vercel.app',
+              `https://${VERCEL_API_DOMAIN}`,
+            ),
+          },
+        },
+        trigger: null,
+      });
+      console.log('Local notification scheduled for foreground check.');
     } else {
       showToast && ToastAndroid.show('App is up to date', ToastAndroid.SHORT);
       console.log(
-        'local version',
+        'App is up to date. local version',
         localVersion,
         'remote version',
         remoteVersion,
@@ -220,11 +263,11 @@ export const checkForUpdate = async (
   } catch (error) {
     ToastAndroid.show('Failed to check for update', ToastAndroid.SHORT);
     console.log('Update error', error);
+  } finally {
+    setUpdateLoading(false);
   }
-  setUpdateLoading(false);
 };
 
-// Function to send the push token to your server
 const sendPushTokenToServer = async (token, useLocalServer) => {
   const apiUrl = useLocalServer
     ? `${LOCAL_API_URL}/api/save-token`
@@ -244,7 +287,6 @@ const sendPushTokenToServer = async (token, useLocalServer) => {
   }
 };
 
-// Function to register for push notifications and get the token
 async function registerForPushNotificationsAsync(useLocalServer) {
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
@@ -255,13 +297,17 @@ async function registerForPushNotificationsAsync(useLocalServer) {
     });
   }
 
-  // To ensure the task is always registered, we unregister it first
-  // and then register it again. This is more reliable across app updates
-  // and restarts than simply checking if it's already registered.
-  if (TaskManager.isTaskRegistered(BACKGROUND_NOTIFICATION_TASK)) {
-    await TaskManager.unregisterTaskAsync(BACKGROUND_NOTIFICATION_TASK);
+  console.log('Checking if background task is already registered...');
+  const isRegistered = await TaskManager.isTaskRegisteredAsync(
+    BACKGROUND_NOTIFICATION_TASK,
+  );
+  if (isRegistered) {
+    console.log('Task already registered.');
+  } else {
+    console.log('Registering background task...');
+    await TaskManager.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
+    console.log('Background task registered successfully.');
   }
-  await TaskManager.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
 
   const {status: existingStatus} = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
@@ -282,93 +328,79 @@ async function registerForPushNotificationsAsync(useLocalServer) {
   sendPushTokenToServer(token, useLocalServer);
 }
 
+async function unregisterBackgroundTaskAsync() {
+  const isRegistered = await TaskManager.isTaskRegisteredAsync(
+    BACKGROUND_NOTIFICATION_TASK,
+  );
+  if (isRegistered) {
+    await TaskManager.unregisterTaskAsync(BACKGROUND_NOTIFICATION_TASK);
+    console.log('Background task unregistered successfully.');
+  } else {
+    console.log('Background task was not registered, no action needed.');
+  }
+}
+
 const About = () => {
   const {primary} = useThemeStore(state => state);
   const [updateLoading, setUpdateLoading] = useState(false);
-
-  // Initialize state with default values, and then load the actual values in a useEffect
+  const isForeground = useIsForeground();
   const [autoDownload, setAutoDownload] = useState(true);
   const [autoCheckUpdate, setAutoCheckUpdate] = useState(true);
-  // useLocalServer is now hardcoded to false, so we don't need a state for it.
   const [showBackgroundNotification, setShowBackgroundNotification] =
     useState(true);
-
   const notificationListener = useRef();
   const responseListener = useRef();
 
+  // The fix is here: we now use the nativeApplicationVersion property directly.
+  const appVersion = Application.nativeApplicationVersion || 'N/A';
+
   useEffect(() => {
-    // Load settings from storage when the component mounts
     const loadSettings = async () => {
       const isAutoDownload = await settingsStorage.isAutoDownloadEnabled();
       const isAutoCheckUpdate =
         await settingsStorage.isAutoCheckUpdateEnabled();
-      // FIX: Correctly load the background notification setting from storage.
       const isBackgroundNotification =
         await settingsStorage.isBackgroundNotificationEnabled();
-
       setAutoDownload(isAutoDownload);
       setAutoCheckUpdate(isAutoCheckUpdate);
       setShowBackgroundNotification(isBackgroundNotification);
 
-      // Register for push notifications with the hardcoded server setting
-      // Since useLocalServer is now hardcoded to false, we can pass that directly.
-      registerForPushNotificationsAsync(false);
+      if (isBackgroundNotification) {
+        registerForPushNotificationsAsync(false);
+      } else {
+        unregisterBackgroundTaskAsync();
+      }
+
+      if (isAutoCheckUpdate) {
+        checkForUpdate(setUpdateLoading, isAutoDownload);
+      }
     };
 
     loadSettings();
 
-    // This listener is fired whenever a notification is received while the app is foregrounded
     notificationListener.current =
       Notifications.addNotificationReceivedListener(notification => {
-        console.log('Notification received (foreground):', notification);
-        const {data, title, body} = notification.request.content;
-
-        // Check for a specific 'update' type in the notification data
-        if (data && data.type === 'update') {
-          const {downloadUrl, fileName} = data;
-          Alert.alert(
-            title || 'New App Update Available!',
-            body || 'Tap to download and install the latest version.',
-            [
-              {text: 'Cancel'},
-              {
-                text: 'Update',
-                onPress: () => downloadUpdate(downloadUrl, fileName),
+        const {type, ...data} = notification.request.content.data;
+        if (isForeground) {
+          if (type === 'message') {
+            Notifications.scheduleNotificationAsync({
+              content: {
+                title: data.title || 'New Message',
+                body: data.message || 'You have a new message.',
               },
-            ],
-          );
-        } else if (data && data.type === 'background-notification') {
-          // Handle a silent background notification received in the foreground
-          Alert.alert(
-            title || 'Background Notification',
-            body || 'You received a new background update!',
-            [{text: 'OK'}],
-          );
-        } else if (data && data.type === 'visible-background-notification') {
-          // Handle the new visible background notification
-          Alert.alert(
-            title || 'Notification',
-            body || 'You have received a new message.',
-            [{text: 'OK'}],
-          );
-        } else {
-          // Handle a simple text message notification
-          Alert.alert(
-            title || 'Notification',
-            body || 'You received a notification!',
-            [{text: 'OK'}],
-          );
+              trigger: null,
+            });
+          }
         }
       });
 
-    // This listener is fired whenever a user taps on or interacts with a notification
     responseListener.current =
       Notifications.addNotificationResponseReceivedListener(response => {
-        console.log('Notification response received:', response);
-        const notificationData = response.notification.request.content.data;
-        if (notificationData?.name) {
-          console.log('User tapped to install update:', notificationData.name);
-          Alert.alert('Install Update', `Installing ${notificationData.name}`);
+        console.log(response);
+        const {type, downloadUrl, fileName} =
+          response.notification.request.content.data;
+        if (type === 'update' && downloadUrl && fileName) {
+          downloadUpdate(downloadUrl, fileName);
         }
       });
 
@@ -378,7 +410,7 @@ const About = () => {
       );
       Notifications.removeNotificationSubscription(responseListener.current);
     };
-  }, []);
+  }, [isForeground]);
 
   return (
     <View className="flex-1 bg-black mt-8">
@@ -393,9 +425,41 @@ const About = () => {
         {/* Version */}
         <View className="bg-white/10 p-4 rounded-lg flex-row justify-between items-center">
           <Text className="text-white text-base">Version</Text>
-          <Text className="text-white/70">
-            v{Application.nativeApplicationVersion}
-          </Text>
+          <Text className="text-white/70">v{appVersion}</Text>
+        </View>
+
+        {/* Background Notifications */}
+        <View className="bg-white/10 p-3 rounded-lg flex-row justify-between items-center">
+          <View className="flex-1 mr-2">
+            <Text className="text-white text-base">
+              Background Notifications
+            </Text>
+            <Text className="text-gray-400 text-sm">
+              Receive notifications even when the app is closed.
+            </Text>
+          </View>
+          <Switch
+            value={showBackgroundNotification}
+            onValueChange={async () => {
+              const newValue = !showBackgroundNotification;
+              setShowBackgroundNotification(newValue);
+              await settingsStorage.setBackgroundNotificationEnabled(newValue);
+              if (newValue) {
+                registerForPushNotificationsAsync(false);
+                ToastAndroid.show(
+                  'Background notifications are now enabled',
+                  ToastAndroid.SHORT,
+                );
+              } else {
+                unregisterBackgroundTaskAsync();
+                ToastAndroid.show(
+                  'Background notifications are now disabled',
+                  ToastAndroid.SHORT,
+                );
+              }
+            }}
+            thumbColor={showBackgroundNotification ? primary : 'gray'}
+          />
         </View>
 
         {/* Auto Install Updates */}
@@ -428,34 +492,6 @@ const About = () => {
               await settingsStorage.setAutoCheckUpdateEnabled(newValue);
             }}
             thumbColor={autoCheckUpdate ? primary : 'gray'}
-          />
-        </View>
-
-        {/* Show Background Notifications */}
-        <View className="bg-white/10 p-3 rounded-lg flex-row justify-between items-center">
-          <View className="flex-1 mr-2">
-            <Text className="text-white text-base">
-              Show Background Notifications
-            </Text>
-            <Text className="text-gray-400 text-sm">
-              Receive notifications when the app is closed.
-            </Text>
-          </View>
-          <Switch
-            value={showBackgroundNotification}
-            onValueChange={async () => {
-              const newValue = !showBackgroundNotification;
-              setShowBackgroundNotification(newValue);
-              // FIX: Save the new value to storage.
-              await settingsStorage.setBackgroundNotificationEnabled(newValue);
-              ToastAndroid.show(
-                `Background notifications are now ${
-                  newValue ? 'enabled' : 'disabled'
-                }`,
-                ToastAndroid.SHORT,
-              );
-            }}
-            thumbColor={showBackgroundNotification ? primary : 'gray'}
           />
         </View>
 

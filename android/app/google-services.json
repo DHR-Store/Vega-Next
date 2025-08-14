@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "941549694662",
-    "project_id": "vega-next",
-    "storage_bucket": "vega-next.firebasestorage.app"
+    "project_number": "642100930411",
+    "project_id": "vga-app-b2312",
+    "storage_bucket": "vga-app-b2312.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:941549694662:android:2ca6aa16f9bc3a6ba771c7",
+        "mobilesdk_app_id": "1:642100930411:android:5f83aaeedfe296fba5ce2e",
         "android_client_info": {
-          "package_name": "com.vega"
+          "package_name": "com.vega.next"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCaiwmkDdM1_ai2d8DFPLUsVu1AS9U7J3s"
+          "current_key": "AIzaSyB4v1579_h9M_Dh6hfQ3wGKT_69AevrKQQ"
         }
       ],
       "services": {

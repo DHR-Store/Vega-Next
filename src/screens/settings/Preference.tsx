@@ -8,92 +8,66 @@ import {
   StatusBar,
 } from 'react-native';
 import React, {useState} from 'react';
-import {settingsStorage} from '../../lib/storage';
+import {MMKV} from '../../lib/Mmkv';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useThemeStore from '../../lib/zustand/themeStore';
 import {Dropdown} from 'react-native-element-dropdown';
 import {themes} from '../../lib/constants';
 import {TextInput} from 'react-native';
-import Constants from 'expo-constants';
-// Lazy-load Firebase to allow running without google-services.json
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const getAnalytics = (): any | null => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require('@react-native-firebase/analytics').default;
-  } catch {
-    return null;
-  }
-};
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const getCrashlytics = (): any | null => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require('@react-native-firebase/crashlytics').default;
-  } catch {
-    return null;
-  }
-};
 
 const Preferences = () => {
-  const hasFirebase = Boolean(Constants?.expoConfig?.extra?.hasFirebase);
   const {primary, setPrimary, isCustom, setCustom} = useThemeStore(
     state => state,
   );
   const [showRecentlyWatched, setShowRecentlyWatched] = useState(
-    settingsStorage.getBool('showRecentlyWatched') || false,
+    MMKV.getBool('showRecentlyWatched') || false,
   );
   const [disableDrawer, setDisableDrawer] = useState(
-    settingsStorage.getBool('disableDrawer') || false,
+    MMKV.getBool('disableDrawer') || false,
   );
 
   const [ExcludedQualities, setExcludedQualities] = useState(
-    settingsStorage.getExcludedQualities(),
+    MMKV.getArray('ExcludedQualities') || [],
   );
 
   const [customColor, setCustomColor] = useState(
-    settingsStorage.getCustomColor(),
+    MMKV.getString('customColor') || '#FF6347',
   );
 
   const [showMediaControls, setShowMediaControls] = useState<boolean>(
-    settingsStorage.showMediaControls(),
+    MMKV.getBool('showMediaControls') === false ? false : true,
   );
 
   const [showHamburgerMenu, setShowHamburgerMenu] = useState<boolean>(
-    settingsStorage.showHamburgerMenu(),
+    MMKV.getBool('showHamburgerMenu') === false ? false : true,
   );
 
   const [hideSeekButtons, setHideSeekButtons] = useState<boolean>(
-    settingsStorage.hideSeekButtons(),
+    MMKV.getBool('hideSeekButtons') || false,
   );
-
-  const [_enable2xGesture, _setEnable2xGesture] = useState<boolean>(
-    settingsStorage.isEnable2xGestureEnabled(),
+  const [enable2xGesture, setEnable2xGesture] = useState<boolean>(
+    MMKV.getBool('enable2xGesture') || false,
   );
 
   const [enableSwipeGesture, setEnableSwipeGesture] = useState<boolean>(
-    settingsStorage.isSwipeGestureEnabled(),
+    MMKV.getBool('enableSwipeGesture') === false ? false : true,
   );
 
   const [showTabBarLables, setShowTabBarLables] = useState<boolean>(
-    settingsStorage.showTabBarLabels(),
+    MMKV.getBool('showTabBarLables') || false,
   );
 
   const [OpenExternalPlayer, setOpenExternalPlayer] = useState(
-    settingsStorage.getBool('useExternalPlayer', false),
+    MMKV.getBool('useExternalPlayer', () => false),
   );
 
   const [hapticFeedback, setHapticFeedback] = useState(
-    settingsStorage.isHapticFeedbackEnabled(),
+    MMKV.getBool('hapticFeedback') === false ? false : true,
   );
 
   const [alwaysUseExternalDownload, setAlwaysUseExternalDownload] = useState(
-    settingsStorage.getBool('alwaysExternalDownloader') || false,
-  );
-
-  const [telemetryOptIn, setTelemetryOptIn] = useState<boolean>(
-    settingsStorage.isTelemetryOptIn(),
+    MMKV.getBool('alwaysExternalDownloader') || false,
   );
 
   return (
@@ -136,7 +110,7 @@ const Preferences = () => {
                           );
                           return;
                         }
-                        settingsStorage.setCustomColor(e.nativeEvent.text);
+                        MMKV.setString('customColor', e.nativeEvent.text);
                         setPrimary(e.nativeEvent.text);
                       }}
                     />
@@ -201,46 +175,8 @@ const Preferences = () => {
                 thumbColor={hapticFeedback ? primary : 'gray'}
                 value={hapticFeedback}
                 onValueChange={() => {
-                  settingsStorage.setHapticFeedbackEnabled(!hapticFeedback);
+                  MMKV.setBool('hapticFeedback', !hapticFeedback);
                   setHapticFeedback(!hapticFeedback);
-                }}
-              />
-            </View>
-
-            {/* Analytics & Crashlytics Opt-In */}
-            <View className="flex-row items-center justify-between p-4 border-b border-[#262626]">
-              <Text className="text-white text-base">
-                Usage & Crash Reports
-              </Text>
-              <Switch
-                thumbColor={telemetryOptIn ? primary : 'gray'}
-                value={telemetryOptIn}
-                onValueChange={async () => {
-                  const next = !telemetryOptIn;
-                  setTelemetryOptIn(next);
-                  settingsStorage.setTelemetryOptIn(next);
-                  if (hasFirebase) {
-                    try {
-                      const crashlytics = getCrashlytics();
-                      crashlytics &&
-                        (await crashlytics().setCrashlyticsCollectionEnabled(
-                          next,
-                        ));
-                    } catch {}
-                    try {
-                      const analytics = getAnalytics();
-                      analytics &&
-                        (await analytics().setAnalyticsCollectionEnabled(next));
-                      // Also update consent for completeness
-                      analytics &&
-                        (await analytics().setConsent({
-                          analytics_storage: next,
-                          ad_storage: next,
-                          ad_user_data: next,
-                          ad_personalization: next,
-                        }));
-                    } catch {}
-                  }
                 }}
               />
             </View>
@@ -252,7 +188,7 @@ const Preferences = () => {
                 thumbColor={showTabBarLables ? primary : 'gray'}
                 value={showTabBarLables}
                 onValueChange={() => {
-                  settingsStorage.setShowTabBarLabels(!showTabBarLables);
+                  MMKV.setBool('showTabBarLables', !showTabBarLables);
                   setShowTabBarLables(!showTabBarLables);
                   ToastAndroid.show(
                     'Restart App to Apply Changes',
@@ -269,7 +205,7 @@ const Preferences = () => {
                 thumbColor={showHamburgerMenu ? primary : 'gray'}
                 value={showHamburgerMenu}
                 onValueChange={() => {
-                  settingsStorage.setShowHamburgerMenu(!showHamburgerMenu);
+                  MMKV.setBool('showHamburgerMenu', !showHamburgerMenu);
                   setShowHamburgerMenu(!showHamburgerMenu);
                 }}
               />
@@ -284,10 +220,7 @@ const Preferences = () => {
                 thumbColor={showRecentlyWatched ? primary : 'gray'}
                 value={showRecentlyWatched}
                 onValueChange={() => {
-                  settingsStorage.setBool(
-                    'showRecentlyWatched',
-                    !showRecentlyWatched,
-                  );
+                  MMKV.setBool('showRecentlyWatched', !showRecentlyWatched);
                   setShowRecentlyWatched(!showRecentlyWatched);
                 }}
               />
@@ -300,7 +233,7 @@ const Preferences = () => {
                 thumbColor={disableDrawer ? primary : 'gray'}
                 value={disableDrawer}
                 onValueChange={() => {
-                  settingsStorage.setBool('disableDrawer', !disableDrawer);
+                  MMKV.setBool('disableDrawer', !disableDrawer);
                   setDisableDrawer(!disableDrawer);
                 }}
               />
@@ -315,7 +248,7 @@ const Preferences = () => {
                 thumbColor={alwaysUseExternalDownload ? primary : 'gray'}
                 value={alwaysUseExternalDownload}
                 onValueChange={() => {
-                  settingsStorage.setBool(
+                  MMKV.setBool(
                     'alwaysExternalDownloader',
                     !alwaysUseExternalDownload,
                   );
@@ -339,7 +272,7 @@ const Preferences = () => {
                 thumbColor={OpenExternalPlayer ? primary : 'gray'}
                 value={OpenExternalPlayer}
                 onValueChange={val => {
-                  settingsStorage.setBool('useExternalPlayer', val);
+                  MMKV.setBool('useExternalPlayer', val);
                   setOpenExternalPlayer(val);
                 }}
               />
@@ -352,7 +285,7 @@ const Preferences = () => {
                 thumbColor={showMediaControls ? primary : 'gray'}
                 value={showMediaControls}
                 onValueChange={() => {
-                  settingsStorage.setShowMediaControls(!showMediaControls);
+                  MMKV.setBool('showMediaControls', !showMediaControls);
                   setShowMediaControls(!showMediaControls);
                 }}
               />
@@ -365,7 +298,7 @@ const Preferences = () => {
                 thumbColor={hideSeekButtons ? primary : 'gray'}
                 value={hideSeekButtons}
                 onValueChange={() => {
-                  settingsStorage.setHideSeekButtons(!hideSeekButtons);
+                  MMKV.setBool('hideSeekButtons', !hideSeekButtons);
                   setHideSeekButtons(!hideSeekButtons);
                 }}
               />
@@ -380,7 +313,7 @@ const Preferences = () => {
                 thumbColor={enableSwipeGesture ? primary : 'gray'}
                 value={enableSwipeGesture}
                 onValueChange={() => {
-                  settingsStorage.setSwipeGestureEnabled(!enableSwipeGesture);
+                  MMKV.setBool('enableSwipeGesture', !enableSwipeGesture);
                   setEnableSwipeGesture(!enableSwipeGesture);
                 }}
               />
@@ -400,14 +333,14 @@ const Preferences = () => {
                 <TouchableOpacity
                   key={index}
                   onPress={() => {
-                    if (settingsStorage.isHapticFeedbackEnabled()) {
+                    if (MMKV.getBool('hapticFeedback') !== false) {
                       RNReactNativeHapticFeedback.trigger('effectTick');
                     }
                     const newExcluded = ExcludedQualities.includes(quality)
                       ? ExcludedQualities.filter(q => q !== quality)
                       : [...ExcludedQualities, quality];
                     setExcludedQualities(newExcluded);
-                    settingsStorage.setExcludedQualities(newExcluded);
+                    MMKV.setArray('ExcludedQualities', newExcluded);
                   }}
                   style={{
                     backgroundColor: ExcludedQualities.includes(quality)

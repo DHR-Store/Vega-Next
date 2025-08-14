@@ -34,11 +34,11 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="com.vega"/>
+        <data android:scheme="com.vega.next"/>
       </intent-filter>
       <intent-filter data-generated="true">
         <action android:name="android.intent.action.VIEW"/>
-        <data android:scheme="com.vega"/>
+        <data android:scheme="com.vega.next"/>
         <category android:name="android.intent.category.BROWSABLE"/>
       </intent-filter>
     </activity>

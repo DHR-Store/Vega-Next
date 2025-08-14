@@ -1,6 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: "com.google.gms.google-services"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
@@ -86,13 +87,13 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.vega'
+    namespace 'com.vega.next'
     defaultConfig {
-        applicationId 'com.vega'
+        applicationId 'com.vega.next'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 145
-        versionName "3.2.5"
+        versionName "3.2.7"
     }
 
     // ADD THIS 'splits' BLOCK HERE for ABI configuration
@@ -187,4 +188,7 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+     implementation platform('com.google.firebase:firebase-bom:32.7.0')
+    implementation 'com.google.firebase:firebase-analytics'
 }
