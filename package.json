@@ -1,11 +1,6 @@
 {
-<<<<<<< HEAD
   "name": "vega-next",
-  "version": "3.2.7",
-=======
-  "name": "vega",
-  "version": "3.2.5",
->>>>>>> bdbc9b8aa76d4806976be131adea869924b79ba9
+  "version": "3.2.8",
   "private": true,
   "scripts": {
     "android": "expo run:android",

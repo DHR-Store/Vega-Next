@@ -93,7 +93,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 145
-        versionName "3.2.7"
+        versionName "3.2.8"
     }
 
     // ADD THIS 'splits' BLOCK HERE for ABI configuration
@@ -102,10 +102,10 @@ android {
             enable true
             reset()
             // Include the ABIs you want to build for
-            include 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+            include 'armeabi-v7a', 'arm64-v8a'
             // Set to false to generate separate APKs for each ABI,
             // which is ideal for uploading to Google Play Console.
-            universalApk false
+            universalApk true
         }
     }
 

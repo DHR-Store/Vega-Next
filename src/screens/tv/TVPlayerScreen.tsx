@@ -1,3 +1,5 @@
+// File: src/screens/tv/TVPlayerScreen.tsx
+
 import React, {useEffect, useState, useRef, useCallback, useMemo} from 'react';
 import {
   ScrollView,
@@ -10,6 +12,7 @@ import {
   Dimensions,
   StyleSheet,
   ActivityIndicator,
+  PanResponder,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -19,6 +22,7 @@ import Animated, {
   withSequence,
   withDelay,
   Layout,
+  runOnJS,
 } from 'react-native-reanimated';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {VegaTVStackParamList} from '../../App';
@@ -226,6 +230,118 @@ const usePlayerProgress = (options: {
     setIsPaused,
   };
 };
+// New hook for gesture control
+const usePlayerGestures = ({
+  playerRef,
+  currentTime,
+  duration,
+  setIsPaused,
+  setShowControls,
+}: any) => {
+  const {width, height} = Dimensions.get('window');
+  const [volume, setVolume] = useState(0.5);
+  const [brightness, setBrightness] = useState(0.5);
+  const [showVolumeIndicator, setShowVolumeIndicator] = useState(false);
+  const [showBrightnessIndicator, setShowBrightnessIndicator] = useState(false);
+  const [showSeekIndicator, setShowSeekIndicator] = useState(false);
+  const [seekTime, setSeekTime] = useState(0);
+  const volumeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const brightnessTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSeek = useCallback(
+    (time: number) => {
+      if (playerRef.current) {
+        const newTime = Math.max(0, Math.min(duration, currentTime + time));
+        playerRef.current.seek(newTime);
+        setSeekTime(newTime);
+        setShowSeekIndicator(true);
+        if (seekTimeoutRef.current) {
+          clearTimeout(seekTimeoutRef.current);
+        }
+        seekTimeoutRef.current = setTimeout(() => {
+          setShowSeekIndicator(false);
+        }, 1000);
+      }
+    },
+    [playerRef, currentTime, duration],
+  );
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (evt, gestureState) => {
+          // Only activate for significant movement
+          return Math.abs(gestureState.dx) > 5 || Math.abs(gestureState.dy) > 5;
+        },
+        onPanResponderMove: (evt, gestureState) => {
+          const {dx, dy, x0} = gestureState;
+          // Horizontal swipe for seeking
+          if (Math.abs(dx) > Math.abs(dy) * 2) {
+            const seekDelta = dx > 0 ? 10 : -10;
+            // Prevent repeated seeking in a single swipe
+            if (Math.abs(dx) > 50) {
+              handleSeek(seekDelta);
+              // Reset gesture state to prevent multiple seeks for one swipe
+              gestureState.dx = 0;
+            }
+            setShowControls(false);
+          }
+          // Vertical swipe for volume/brightness
+          else if (Math.abs(dy) > Math.abs(dx) * 2) {
+            // Right side of the screen for volume
+            if (x0 > width / 2) {
+              const newVolume = Math.max(0, Math.min(1, volume - dy / height));
+              setVolume(newVolume);
+              setShowVolumeIndicator(true);
+              if (volumeTimeoutRef.current) {
+                clearTimeout(volumeTimeoutRef.current);
+              }
+              volumeTimeoutRef.current = setTimeout(() => {
+                setShowVolumeIndicator(false);
+              }, 1000);
+            }
+            // Left side of the screen for brightness
+            else {
+              const newBrightness = Math.max(
+                0,
+                Math.min(1, brightness - dy / height),
+              );
+              setBrightness(newBrightness);
+              setShowBrightnessIndicator(true);
+              if (brightnessTimeoutRef.current) {
+                clearTimeout(brightnessTimeoutRef.current);
+              }
+              brightnessTimeoutRef.current = setTimeout(() => {
+                setShowBrightnessIndicator(false);
+              }, 1000);
+            }
+            setShowControls(false);
+          }
+        },
+        onPanResponderRelease: () => {
+          // Small delay before showing controls again after gesture ends
+          setTimeout(() => setShowControls(true), 1500);
+        },
+        onPanResponderGrant: () => {
+          setIsPaused(false);
+        },
+      }),
+    [volume, brightness, width, height, playerRef, currentTime, duration],
+  );
+
+  return {
+    panResponder,
+    volume,
+    brightness,
+    showVolumeIndicator,
+    showBrightnessIndicator,
+    showSeekIndicator,
+    seekTime,
+    handleSeek,
+  };
+};
 
 type TVPlayerScreenProps = NativeStackScreenProps<
   VegaTVStackParamList,
@@ -331,6 +447,23 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
     playbackRate,
   });
 
+  const {
+    panResponder,
+    volume,
+    brightness,
+    showVolumeIndicator,
+    showBrightnessIndicator,
+    showSeekIndicator,
+    seekTime,
+    handleSeek,
+  } = usePlayerGestures({
+    playerRef,
+    currentTime,
+    duration,
+    setIsPaused,
+    setShowControls,
+  });
+
   const playbacks = useMemo(
     () => [0.25, 0.5, 1.0, 1.25, 1.35, 1.5, 1.75, 2],
     [],
@@ -363,22 +496,13 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
     return `${pad(minutes)}:${pad(seconds)}`;
   };
 
-  const handleSeek = useCallback(
-    (time: number) => {
-      if (playerRef.current) {
-        playerRef.current.seek(time);
-      }
-    },
-    [playerRef],
-  );
-
   const handleRewind = useCallback(() => {
-    handleSeek(currentTime - 10);
-  }, [currentTime, handleSeek]);
+    handleSeek(-10);
+  }, [handleSeek]);
 
   const handleForward = useCallback(() => {
-    handleSeek(currentTime + 10);
-  }, [currentTime, handleSeek]);
+    handleSeek(10);
+  }, [handleSeek]);
 
   const handlePlayPause = useCallback(() => {
     setIsPaused(prev => !prev);
@@ -463,13 +587,14 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
       duration: 250,
     });
     controlsOpacity.value = withTiming(
-      showControls && !isPlayerLocked ? 1 : 0,
+      showControls && !isPlayerLocked && !showSettings ? 1 : 0,
       {duration: 250},
     );
   }, [
     isPlayerLocked,
     showUnlockButton,
     showControls,
+    showSettings,
     lockButtonOpacity,
     lockButtonTranslateX,
     controlsOpacity,
@@ -551,7 +676,7 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
             ? handleLockedScreenTap
             : () => setShowControls(!showControls)
         }>
-        <View style={styles.videoWrapper}>
+        <View style={styles.videoWrapper} {...panResponder.panHandlers}>
           <Video
             ref={playerRef}
             source={{uri: selectedStream?.link}}
@@ -567,6 +692,47 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
             selectedAudioTrack={selectedAudioTrack}
             selectedVideoTrack={selectedVideoTrack}
           />
+          {showVolumeIndicator && (
+            <View style={styles.centerIndicator}>
+              <Ionicons
+                name={volume === 0 ? 'volume-mute' : 'volume-high'}
+                size={40}
+                color="white"
+              />
+              <View style={styles.volumeBar}>
+                <View
+                  style={[styles.volumeFill, {height: `${volume * 100}%`}]}
+                />
+              </View>
+            </View>
+          )}
+
+          {showBrightnessIndicator && (
+            <View style={styles.centerIndicator}>
+              <Ionicons name="sunny" size={40} color="white" />
+              <View style={styles.volumeBar}>
+                <View
+                  style={[
+                    styles.volumeFill,
+                    {height: `${brightness * 100}%`, backgroundColor: 'white'},
+                  ]}
+                />
+              </View>
+            </View>
+          )}
+
+          {showSeekIndicator && (
+            <View style={styles.seekIndicatorContainer}>
+              <Ionicons
+                name={seekTime > currentTime ? 'play-forward' : 'play-back'}
+                size={40}
+                color="white"
+              />
+              <Text style={styles.seekIndicatorText}>
+                {formatTime(seekTime)}
+              </Text>
+            </View>
+          )}
 
           <Animated.View
             style={[styles.controlsOverlay, controlsStyle]}
@@ -1077,6 +1243,47 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 50,
     backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  centerIndicator: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{translateX: -20}, {translateY: -50}],
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 10,
+    borderRadius: 10,
+    zIndex: 10,
+  },
+  volumeBar: {
+    width: 10,
+    height: 80,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 5,
+    marginTop: 10,
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  volumeFill: {
+    width: '100%',
+    backgroundColor: 'white',
+  },
+  seekIndicatorContainer: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{translateX: -50}, {translateY: -20}],
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 10,
+    borderRadius: 10,
+    zIndex: 10,
+  },
+  seekIndicatorText: {
+    color: 'white',
+    fontSize: 24,
+    marginLeft: 10,
   },
 });
 

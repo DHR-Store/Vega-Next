@@ -17,15 +17,12 @@ import {Feather, Ionicons} from '@expo/vector-icons';
 import {useNavigation} from '@react-navigation/native';
 import {LinearGradient} from 'expo-linear-gradient';
 import Toast from 'react-native-toast-message';
+import useMusicStore, {Song} from '../../lib/zustand/musicStore'; // Import the new store
 
 const {width} = Dimensions.get('window');
 
-// API base URL from user request
 const API_BASE_URL = 'https://jiosaavn-api-privatecvc2.vercel.app';
 
-/**
- * Data class to represent the structure of a music item (Album, Song, Chart, Artist).
- */
 interface MusicItem {
   id?: string;
   name?: string;
@@ -36,56 +33,119 @@ interface MusicItem {
   url?: string;
 }
 
-/**
- * Interface for the overall music data structure.
- */
 interface MusicData {
-  charts: MusicItem[];
-  albums: MusicItem[];
+  trendingSongs: MusicItem[];
+  newAlbums: MusicItem[];
   newReleases: MusicItem[];
 }
 
-// Component to render a section title
 const SectionTitle = ({title}: {title: string}) => (
   <Text style={styles.sectionTitle}>{title}</Text>
 );
 
-// Component to render a horizontal list of music items
-const MusicHorizontalList = ({data}: {data: MusicItem[]}) => (
-  <FlatList
-    data={data}
-    horizontal
-    showsHorizontalScrollIndicator={false}
-    keyExtractor={item => item.id || Math.random().toString()}
-    renderItem={({item}) => (
-      <View style={styles.itemContainer}>
-        <Image source={{uri: item.image?.[0]?.link}} style={styles.itemImage} />
-        <Text style={styles.itemTitle}>{item.name}</Text>
-        <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
-      </View>
-    )}
-  />
-);
+const MusicHorizontalList = ({data}: {data: MusicItem[]}) => {
+  const {playSong} = useMusicStore();
+  const navigation = useNavigation();
 
-// Component to render a list of search results
-const SearchResultsList = ({data}: {data: MusicItem[]}) => (
-  <FlatList
-    data={data}
-    keyExtractor={item => item.id || Math.random().toString()}
-    renderItem={({item}) => (
-      <TouchableOpacity style={styles.searchItemContainer}>
-        <Image
-          source={{uri: item.image?.[0]?.link}}
-          style={styles.searchItemImage}
-        />
-        <View style={styles.searchItemTextContainer}>
-          <Text style={styles.searchItemTitle}>{item.name}</Text>
-          <Text style={styles.searchItemSubtitle}>{item.subtitle}</Text>
-        </View>
-      </TouchableOpacity>
-    )}
-  />
-);
+  return (
+    <FlatList
+      data={data}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      keyExtractor={item => item.id || Math.random().toString()}
+      renderItem={({item}) => (
+        <TouchableOpacity
+          style={styles.itemContainer}
+          onPress={() => {
+            if (
+              item.id &&
+              item.name &&
+              item.artists?.[0]?.name &&
+              item.image?.[0]?.link
+            ) {
+              const songToPlay: Song = {
+                id: item.id,
+                name: item.name,
+                artist: item.artists?.[0]?.name,
+                image: item.image?.[0]?.link,
+                duration: 283,
+              };
+              playSong(songToPlay);
+              navigation.navigate('VegaMusicPlayerScreen');
+            } else {
+              Toast.show({
+                type: 'error',
+                text1: 'Song Error',
+                text2: 'Failed to get song details.',
+              });
+            }
+          }}>
+          <Image
+            source={{uri: item.image?.[0]?.link}}
+            style={styles.itemImage}
+          />
+          <Text style={styles.itemTitle}>{item.name}</Text>
+          <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
+        </TouchableOpacity>
+      )}
+    />
+  );
+};
+
+// This component handles search results on the home screen
+const SearchResultsList = ({data}: {data: MusicItem[]}) => {
+  const {playSong} = useMusicStore();
+  const navigation = useNavigation();
+
+  return (
+    <FlatList
+      data={data}
+      keyExtractor={item => item.id || Math.random().toString()}
+      renderItem={({item}) => (
+        <TouchableOpacity
+          style={styles.searchItemContainer}
+          onPress={() => {
+            if (
+              item.id &&
+              item.name &&
+              item.artists?.[0]?.name &&
+              item.image?.[0]?.link
+            ) {
+              const songToPlay: Song = {
+                id: item.id,
+                name: item.name,
+                artist: item.artists?.[0]?.name,
+                image: item.image?.[0]?.link,
+                duration: 283,
+              };
+              playSong(songToPlay);
+              navigation.navigate('VegaMusicPlayerScreen');
+              Toast.show({
+                type: 'success',
+                text1: `Now playing: ${item.name}`,
+                text2: `by ${item.artists?.[0]?.name}`,
+              });
+            } else {
+              Toast.show({
+                type: 'error',
+                text1: 'Song Error',
+                text2: 'Failed to get song details.',
+              });
+            }
+          }}>
+          <Image
+            source={{uri: item.image?.[0]?.link}}
+            style={styles.searchItemImage}
+          />
+          <View style={styles.searchItemTextContainer}>
+            <Text style={styles.searchItemTitle}>{item.name}</Text>
+            <Text style={styles.searchItemSubtitle}>{item.subtitle}</Text>
+          </View>
+        </TouchableOpacity>
+      )}
+    />
+  );
+};
 
 const VegaMusicHome = () => {
   const navigation = useNavigation();
@@ -94,62 +154,58 @@ const VegaMusicHome = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResults, setSearchResults] = useState<MusicItem[] | null>(null);
   const [isSearching, setIsSearching] = useState<boolean>(false);
-
-  // Ref to track if the component is mounted.
   const isMounted = useRef(true);
+  const {playSong} = useMusicStore();
 
-  // Set isMounted to false when the component unmounts.
   useEffect(() => {
     return () => {
       isMounted.current = false;
     };
   }, []);
 
-  /**
-   * Fetches music data for the home screen from the Saavn API.
-   */
   const fetchMusicDataFromSaavn = useCallback(async () => {
     try {
       if (!isMounted.current) return;
       setIsLoading(true);
-
       const response = await fetch(`${API_BASE_URL}/modules?language=english`);
       const data = await response.json();
-
       if (isMounted.current) {
         if (data.status === 'SUCCESS' && data.data) {
           const apiData = data.data;
           const transformedData: MusicData = {
-            charts: apiData.charts.map((item: any) => ({
-              id: item.id,
-              name: item.title,
-              subtitle: item.subtitle,
-              image: item.image,
-              color: '#1DB954',
-              url: item.url,
-            })),
-            albums: apiData.albums.map((item: any) => ({
-              id: item.id,
-              name: item.title,
-              subtitle: item.artists
-                ?.map((artist: any) => artist.name)
-                .join(', '),
-              image: item.image,
-              url: item.url,
-            })),
-            newReleases: apiData.new_albums.map((item: any) => ({
-              id: item.id,
-              name: item.title,
-              subtitle: item.artists
-                ?.map((artist: any) => artist.name)
-                .join(', '),
-              image: item.image,
-              url: item.url,
-            })),
+            trendingSongs:
+              apiData.charts?.map((item: any) => ({
+                id: item.id,
+                name: item.title,
+                subtitle: item.subtitle,
+                image: item.image,
+                color: '#1DB954',
+                url: item.url,
+              })) || [],
+            newAlbums:
+              apiData.albums?.map((item: any) => ({
+                id: item.id,
+                name: item.title,
+                subtitle: item.artists
+                  ?.map((artist: any) => artist.name)
+                  .join(', '),
+                image: item.image,
+                url: item.url,
+              })) || [],
+            newReleases:
+              apiData.new_albums?.map((item: any) => ({
+                id: item.id,
+                name: item.title,
+                subtitle: item.artists
+                  ?.map((artist: any) => artist.name)
+                  .join(', '),
+                image: item.image,
+                url: item.url,
+              })) || [],
           };
           setMusicData(transformedData);
         } else {
-          setMusicData({charts: [], albums: [], newReleases: []});
+          setMusicData({trendingSongs: [], newAlbums: [], newReleases: []});
         }
         setIsLoading(false);
       }
@@ -167,38 +223,32 @@ const VegaMusicHome = () => {
     }
   }, []);
 
-  /**
-   * Fetches search results based on the search query.
-   */
   const fetchSearchResults = useCallback(async (query: string) => {
     if (!query) {
       setSearchResults(null);
       return;
     }
-
     if (!isMounted.current) return;
     setIsSearching(true);
-    Keyboard.dismiss(); // Hide the keyboard
-
+    Keyboard.dismiss();
     try {
-      // Use the specific search songs endpoint
       const response = await fetch(
         `${API_BASE_URL}/search/songs?query=${encodeURIComponent(query)}`,
       );
       const data = await response.json();
-
       if (isMounted.current) {
-        // The API response structure is different, so we check for 'data.results'
         if (data.status === 'SUCCESS' && data.data?.results) {
-          const transformedResults = data.data.results.map((item: any) => ({
-            id: item.id,
-            name: item.title,
-            subtitle: item.artists
-              ?.map((artist: any) => artist.name)
-              .join(', '),
-            image: item.image,
-            url: item.url,
-          }));
+          const transformedResults =
+            data.data.results?.map((item: any) => ({
+              id: item.id,
+              name: item.title,
+              subtitle: item.artists
+                ?.map((artist: any) => artist.name)
+                .join(', '),
+              image: item.image,
+              url: item.url,
+              artists: item.artists,
+            })) || [];
           setSearchResults(transformedResults);
         } else {
           setSearchResults([]);
@@ -277,42 +327,73 @@ const VegaMusicHome = () => {
 
     return (
       <ScrollView style={styles.scrollView}>
-        {musicData.charts.length > 0 && (
+        {musicData.trendingSongs?.length > 0 && (
           <View style={styles.section}>
-            <SectionTitle title="Charts" />
+            <SectionTitle title="Trending Songs" />
             <FlatList
-              data={musicData.charts}
+              data={musicData.trendingSongs}
               horizontal
               showsHorizontalScrollIndicator={false}
               keyExtractor={item => item.id || Math.random().toString()}
               renderItem={({item}) => (
-                <LinearGradient
-                  colors={[item.color || '#1DB954', '#121212']}
-                  start={{x: 0, y: 0}}
-                  end={{x: 1, y: 1}}
-                  style={styles.chartItem}>
-                  <Image
-                    source={{uri: item.image?.[0]?.link}}
-                    style={styles.chartImage}
-                  />
-                  <View style={styles.chartTextContainer}>
-                    <Text style={styles.chartTitle}>{item.name}</Text>
-                    <Text style={styles.chartSubtitle}>{item.subtitle}</Text>
-                  </View>
-                </LinearGradient>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (
+                      item.id &&
+                      item.name &&
+                      item.subtitle &&
+                      item.image?.[0]?.link
+                    ) {
+                      const songToPlay: Song = {
+                        id: item.id,
+                        name: item.name,
+                        artist: item.subtitle,
+                        image: item.image?.[0]?.link,
+                        duration: 283,
+                      };
+                      playSong(songToPlay);
+                      navigation.navigate('VegaMusicPlayerScreen');
+                      Toast.show({
+                        type: 'success',
+                        text1: `Now playing: ${songToPlay.name}`,
+                        text2: `by ${songToPlay.artist}`,
+                      });
+                    } else {
+                      Toast.show({
+                        type: 'error',
+                        text1: 'Song Error',
+                        text2: 'Failed to get song details.',
+                      });
+                    }
+                  }}>
+                  <LinearGradient
+                    colors={[item.color || '#1DB954', '#121212']}
+                    start={{x: 0, y: 0}}
+                    end={{x: 1, y: 1}}
+                    style={styles.chartItem}>
+                    <Image
+                      source={{uri: item.image?.[0]?.link}}
+                      style={styles.chartImage}
+                    />
+                    <View style={styles.chartTextContainer}>
+                      <Text style={styles.chartTitle}>{item.name}</Text>
+                      <Text style={styles.chartSubtitle}>{item.subtitle}</Text>
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
               )}
             />
           </View>
         )}
 
-        {musicData.albums.length > 0 && (
+        {musicData.newAlbums?.length > 0 && (
           <View style={styles.section}>
             <SectionTitle title="New Albums" />
-            <MusicHorizontalList data={musicData.albums} />
+            <MusicHorizontalList data={musicData.newAlbums} />
           </View>
         )}
 
-        {musicData.newReleases.length > 0 && (
+        {musicData.newReleases?.length > 0 && (
           <View style={styles.section}>
             <SectionTitle title="New Releases" />
             <MusicHorizontalList data={musicData.newReleases} />
@@ -324,6 +405,7 @@ const VegaMusicHome = () => {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header for menu/settings buttons */}
       <View style={styles.header}>
         {searchResults ? (
           <TouchableOpacity onPress={() => setSearchResults(null)}>
@@ -337,6 +419,16 @@ const VegaMusicHome = () => {
             <Feather name="menu" size={24} color="#FFFFFF" />
           </TouchableOpacity>
         )}
+        <TouchableOpacity
+          onPress={() => {
+            navigation.navigate('VegaSettings');
+          }}>
+          <Ionicons name="settings-outline" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Search Bar - Moved to its own container below the header */}
+      <View style={styles.searchBarContainer}>
         <TextInput
           style={styles.searchBar}
           placeholder="Search for songs or artists..."
@@ -346,13 +438,6 @@ const VegaMusicHome = () => {
           onSubmitEditing={() => fetchSearchResults(searchQuery)}
           returnKeyType="search"
         />
-        <TouchableOpacity
-          onPress={() => {
-            // Navigate to the VegaSettings screen
-            navigation.navigate('VegaSettings');
-          }}>
-          <Ionicons name="settings-outline" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
       </View>
 
       {renderContent()}
@@ -375,18 +460,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 5,
+  },
+  searchBarContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#282828',
   },
   searchBar: {
-    flex: 1,
     height: 40,
     backgroundColor: '#282828',
     borderRadius: 20,
     paddingHorizontal: 15,
     color: '#FFFFFF',
-    marginHorizontal: 10,
   },
   headerTitle: {
     color: '#FFFFFF',

@@ -287,7 +287,10 @@ const sendPushTokenToServer = async (token, useLocalServer) => {
   }
 };
 
-async function registerForPushNotificationsAsync(useLocalServer) {
+async function registerForPushNotificationsAsync(
+  useLocalServer,
+  isInitialRequest = false,
+) {
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
       name: 'default',
@@ -311,10 +314,31 @@ async function registerForPushNotificationsAsync(useLocalServer) {
 
   const {status: existingStatus} = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
-  if (existingStatus !== 'granted') {
+
+  // Add a pop-up message for the initial permission request
+  if (isInitialRequest && existingStatus === 'undetermined') {
+    Alert.alert(
+      'Enable Notifications',
+      'Please enable notifications to receive updates about new messages and app updates even when the app is closed.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'OK',
+          onPress: async () => {
+            const {status} = await Notifications.requestPermissionsAsync();
+            finalStatus = status;
+          },
+        },
+      ],
+    );
+  } else if (existingStatus !== 'granted') {
     const {status} = await Notifications.requestPermissionsAsync();
     finalStatus = status;
   }
+
   if (finalStatus !== 'granted') {
     Alert.alert(
       'Permission not granted',
@@ -366,7 +390,8 @@ const About = () => {
       setShowBackgroundNotification(isBackgroundNotification);
 
       if (isBackgroundNotification) {
-        registerForPushNotificationsAsync(false);
+        // Pass 'true' to indicate this is the initial request from useEffect
+        registerForPushNotificationsAsync(false, true);
       } else {
         unregisterBackgroundTaskAsync();
       }
@@ -445,7 +470,8 @@ const About = () => {
               setShowBackgroundNotification(newValue);
               await settingsStorage.setBackgroundNotificationEnabled(newValue);
               if (newValue) {
-                registerForPushNotificationsAsync(false);
+                // Pass 'false' to avoid showing the pop-up on subsequent toggles
+                registerForPushNotificationsAsync(false, false);
                 ToastAndroid.show(
                   'Background notifications are now enabled',
                   ToastAndroid.SHORT,

@@ -2,6 +2,7 @@ import React from 'react';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import VegaMusicHome from '../screens/music/VegaMusicHome';
 import VegaMusicSearch from '../screens/music/VegaMusicSearch';
+import VegaMusicPlayerScreen from '../screens/music/VegaMusicPlayerScreen'; // Import the music player screen
 import {VegaMusicStackParamList} from '../App';
 
 // Define the stack navigator for the music app mode
@@ -25,6 +26,11 @@ function VegaMusicStack() {
       }}>
       <Stack.Screen name="VegaMusicHome" component={VegaMusicHome} />
       <Stack.Screen name="VegaMusicSearch" component={VegaMusicSearch} />
+      {/* Added the music player screen to the navigator */}
+      <Stack.Screen
+        name="VegaMusicPlayerScreen"
+        component={VegaMusicPlayerScreen}
+      />
     </Stack.Navigator>
   );
 }
