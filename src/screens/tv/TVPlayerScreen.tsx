@@ -88,8 +88,11 @@ const useVideoSettings = () => {
   const [textTracks, setTextTracks] = useState([]);
   const [videoTracks, setVideoTracks] = useState([]);
   const [selectedAudioTrackIndex, setSelectedAudioTrackIndex] = useState(-1);
-  const [selectedTextTrackIndex, setSelectedTextTrackIndex] = useState(-1);
   const [selectedQualityIndex, setSelectedQualityIndex] = useState(-1);
+
+  // New state to hold the selected text track object directly
+  const [selectedTextTrack, setSelectedTextTrack] = useState<any>(null);
+
   const processAudioTracks = useCallback((tracks: any[]) => {
     setAudioTracks(tracks);
     if (tracks.length > 0) {
@@ -98,14 +101,26 @@ const useVideoSettings = () => {
       setSelectedAudioTrackIndex(-1);
     }
   }, []);
+
   const processTextTracks = useCallback((tracks: any[]) => {
     setTextTracks(tracks);
-    setSelectedTextTrackIndex(-1);
+    setSelectedTextTrack(null);
   }, []);
+
   const processVideoTracks = useCallback((tracks: any[]) => {
     setVideoTracks(tracks);
     setSelectedQualityIndex(-1);
   }, []);
+
+  // New function to handle subtitle selection
+  const handleSelectSubtitle = useCallback((index: number) => {
+    if (index === -1) {
+      setSelectedTextTrack(null);
+    } else {
+      setSelectedTextTrack({type: SelectedTrackType.INDEX, value: index});
+    }
+  }, []);
+
   const selectedAudioTrack = useMemo(() => {
     if (
       selectedAudioTrackIndex !== -1 &&
@@ -118,15 +133,7 @@ const useVideoSettings = () => {
     }
     return undefined;
   }, [selectedAudioTrackIndex, audioTracks]);
-  const selectedTextTrack = useMemo(() => {
-    if (selectedTextTrackIndex !== -1 && textTracks[selectedTextTrackIndex]) {
-      return {
-        type: SelectedTrackType.INDEX,
-        value: selectedTextTrackIndex,
-      };
-    }
-    return {type: SelectedTrackType.DISABLED};
-  }, [selectedTextTrackIndex, textTracks]);
+
   const selectedVideoTrack = useMemo(() => {
     if (selectedQualityIndex !== -1 && videoTracks[selectedQualityIndex]) {
       return {
@@ -136,15 +143,14 @@ const useVideoSettings = () => {
     }
     return {type: SelectedTrackType.AUTO};
   }, [selectedQualityIndex, videoTracks]);
+
   return {
     audioTracks,
     textTracks,
     videoTracks,
     selectedAudioTrackIndex,
-    selectedTextTrackIndex,
     selectedQualityIndex,
     setSelectedAudioTrackIndex,
-    setSelectedTextTrackIndex,
     setSelectedQualityIndex,
     processAudioTracks,
     setTextTracks: processTextTracks,
@@ -152,6 +158,7 @@ const useVideoSettings = () => {
     selectedAudioTrack,
     selectedTextTrack,
     selectedVideoTrack,
+    handleSelectSubtitle,
   };
 };
 const usePlayerSettings = () => {
@@ -230,7 +237,7 @@ const usePlayerProgress = (options: {
     setIsPaused,
   };
 };
-// New hook for gesture control
+
 const usePlayerGestures = ({
   playerRef,
   currentTime,
@@ -271,25 +278,19 @@ const usePlayerGestures = ({
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: (evt, gestureState) => {
-          // Only activate for significant movement
-          return Math.abs(gestureState.dx) > 5 || Math.abs(gestureState.dy) > 5;
-        },
         onPanResponderMove: (evt, gestureState) => {
           const {dx, dy, x0} = gestureState;
+
           // Horizontal swipe for seeking
-          if (Math.abs(dx) > Math.abs(dy) * 2) {
+          if (Math.abs(dx) > Math.abs(dy) * 2 && Math.abs(dx) > 10) {
             const seekDelta = dx > 0 ? 10 : -10;
-            // Prevent repeated seeking in a single swipe
-            if (Math.abs(dx) > 50) {
-              handleSeek(seekDelta);
-              // Reset gesture state to prevent multiple seeks for one swipe
-              gestureState.dx = 0;
-            }
+            handleSeek(seekDelta);
             setShowControls(false);
+            // Reset dx to prevent continuous seeking in a single long swipe
+            gestureState.dx = 0;
           }
           // Vertical swipe for volume/brightness
-          else if (Math.abs(dy) > Math.abs(dx) * 2) {
+          else if (Math.abs(dy) > Math.abs(dx) * 2 && Math.abs(dy) > 5) {
             // Right side of the screen for volume
             if (x0 > width / 2) {
               const newVolume = Math.max(0, Math.min(1, volume - dy / height));
@@ -321,7 +322,6 @@ const usePlayerGestures = ({
           }
         },
         onPanResponderRelease: () => {
-          // Small delay before showing controls again after gesture ends
           setTimeout(() => setShowControls(true), 1500);
         },
         onPanResponderGrant: () => {
@@ -404,10 +404,8 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
     textTracks,
     videoTracks,
     selectedAudioTrackIndex,
-    selectedTextTrackIndex,
     selectedQualityIndex,
     setSelectedAudioTrackIndex,
-    setSelectedTextTrackIndex,
     setSelectedQualityIndex,
     processAudioTracks,
     setTextTracks,
@@ -415,6 +413,7 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
     selectedAudioTrack,
     selectedTextTrack,
     selectedVideoTrack,
+    handleSelectSubtitle,
   } = useVideoSettings();
 
   const {
@@ -476,9 +475,9 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
     if (num > 1080) return '4K';
     if (num > 720) return '1080p';
     if (num > 480) return '720p';
-    if (num > 360) return '480p';
-    if (num > 240) return '360p';
-    if (num > 144) return '240p';
+    if (num > 360) return '360p';
+    if (num > 240) return '240p';
+    if (num > 144) return '144p';
     return `${num}p`;
   }, []);
 
@@ -627,14 +626,13 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
   }, [selectedQualityIndex, videoTracks, formatQuality]);
 
   const getSubtitleText = useCallback(() => {
-    if (selectedTextTrackIndex === -1) {
+    if (!selectedTextTrack) {
       return 'Off';
     }
-    const track = textTracks[selectedTextTrackIndex];
-    return (
-      track?.title || track?.language || `Sub ${selectedTextTrackIndex + 1}`
-    );
-  }, [selectedTextTrackIndex, textTracks]);
+    const trackIndex = selectedTextTrack.value as number;
+    const track = textTracks[trackIndex];
+    return track?.title || track?.language || `Sub ${trackIndex + 1}`;
+  }, [selectedTextTrack, textTracks]);
 
   const getAudioText = useCallback(() => {
     if (selectedAudioTrackIndex === -1) {
@@ -670,239 +668,256 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
     <SafeAreaView style={styles.container}>
       <StatusBar hidden />
 
-      <TouchableNativeFeedback
-        onPress={
-          isPlayerLocked
-            ? handleLockedScreenTap
-            : () => setShowControls(!showControls)
-        }>
-        <View style={styles.videoWrapper} {...panResponder.panHandlers}>
-          <Video
-            ref={playerRef}
-            source={{uri: selectedStream?.link}}
-            style={styles.backgroundVideo}
-            controls={false}
-            paused={isPaused}
-            onLoad={handleVideoLoad}
-            onProgress={handleProgress}
-            onError={handleVideoError}
-            resizeMode={resizeMode}
-            rate={playbackRate}
-            selectedTextTrack={selectedTextTrack}
-            selectedAudioTrack={selectedAudioTrack}
-            selectedVideoTrack={selectedVideoTrack}
-          />
-          {showVolumeIndicator && (
-            <View style={styles.centerIndicator}>
-              <Ionicons
-                name={volume === 0 ? 'volume-mute' : 'volume-high'}
-                size={40}
-                color="white"
-              />
-              <View style={styles.volumeBar}>
-                <View
-                  style={[styles.volumeFill, {height: `${volume * 100}%`}]}
-                />
-              </View>
-            </View>
-          )}
-
-          {showBrightnessIndicator && (
-            <View style={styles.centerIndicator}>
-              <Ionicons name="sunny" size={40} color="white" />
-              <View style={styles.volumeBar}>
-                <View
-                  style={[
-                    styles.volumeFill,
-                    {height: `${brightness * 100}%`, backgroundColor: 'white'},
-                  ]}
-                />
-              </View>
-            </View>
-          )}
-
-          {showSeekIndicator && (
-            <View style={styles.seekIndicatorContainer}>
-              <Ionicons
-                name={seekTime > currentTime ? 'play-forward' : 'play-back'}
-                size={40}
-                color="white"
-              />
-              <Text style={styles.seekIndicatorText}>
-                {formatTime(seekTime)}
-              </Text>
-            </View>
-          )}
-
-          <Animated.View
-            style={[styles.controlsOverlay, controlsStyle]}
-            layout={Layout}>
-            <View style={styles.controlsHeader}>
-              <TouchableOpacity
-                onPress={() => navigation.goBack()}
-                style={styles.headerButton}>
-                <Ionicons name="chevron-back-outline" size={30} color="white" />
-              </TouchableOpacity>
-              <View style={styles.headerTitleContainer}>
-                <Text style={styles.videoTitleText}>
-                  {title || 'TV Channel'}
-                </Text>
-                {subtitle && (
-                  <Text style={styles.videoSubtitleText}>{subtitle}</Text>
-                )}
-              </View>
-              <TouchableOpacity
-                onPress={togglePlayerLock}
-                style={[styles.headerButton, styles.lockButton]}>
+      <View style={styles.videoWrapper}>
+        <Video
+          ref={playerRef}
+          source={{uri: selectedStream?.link}}
+          style={styles.backgroundVideo}
+          controls={false}
+          paused={isPaused}
+          onLoad={handleVideoLoad}
+          onProgress={handleProgress}
+          onError={handleVideoError}
+          resizeMode={resizeMode}
+          rate={playbackRate}
+          selectedTextTrack={selectedTextTrack}
+          selectedAudioTrack={selectedAudioTrack}
+          selectedVideoTrack={selectedVideoTrack}
+        />
+        {/* New Gesture Overlay to capture all touches */}
+        <TouchableNativeFeedback
+          onPress={
+            isPlayerLocked
+              ? handleLockedScreenTap
+              : () => setShowControls(!showControls)
+          }>
+          <View style={styles.gestureOverlay} {...panResponder.panHandlers}>
+            {showVolumeIndicator && (
+              <View style={styles.centerIndicator}>
                 <Ionicons
-                  name={
-                    isPlayerLocked ? 'lock-closed-outline' : 'lock-open-outline'
-                  }
-                  size={24}
-                  color="white"
-                />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.middleControls}>
-              <TouchableOpacity
-                onPress={handleRewind}
-                style={styles.middleButton}>
-                <Ionicons
-                  name="refresh-circle-outline"
-                  size={50}
-                  color="white"
-                  style={styles.rotateLeft}
-                />
-                <Text style={styles.middleButtonText}>10</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handlePlayPause}
-                style={styles.middleButton}>
-                <Ionicons
-                  name={
-                    isPaused ? 'play-circle-outline' : 'pause-circle-outline'
-                  }
-                  size={80}
-                  color="white"
-                />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleForward}
-                style={styles.middleButton}>
-                <Ionicons
-                  name="refresh-circle-outline"
-                  size={50}
-                  color="white"
-                  style={styles.rotateRight}
-                />
-                <Text style={styles.middleButtonText}>10</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.controlsFooter}>
-              <View style={styles.timeContainer}>
-                <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
-                <View style={styles.progressBar}>
-                  <View
-                    style={[
-                      styles.progressIndicator,
-                      {width: `${(currentTime / duration) * 100}%`},
-                    ]}
-                  />
-                </View>
-                <Text style={styles.timeText}>{formatTime(duration)}</Text>
-              </View>
-
-              <View style={styles.footerButtonsContainer}>
-                <TouchableOpacity
-                  onPress={() => {
-                    setShowSettings(!showSettings);
-                    setActiveTab('audio');
-                  }}
-                  style={styles.footerButton}>
-                  <Ionicons
-                    name="volume-high-outline"
-                    size={24}
-                    color="white"
-                  />
-                  <Text style={styles.footerButtonText}>{getAudioText()}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    setShowSettings(!showSettings);
-                    setActiveTab('subtitles');
-                  }}
-                  style={styles.footerButton}>
-                  <Ionicons
-                    name="closed-captioning-outline"
-                    size={24}
-                    color="white"
-                  />
-                  <Text style={styles.footerButtonText}>
-                    {getSubtitleText()}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    setShowSettings(!showSettings);
-                    setActiveTab('speed');
-                  }}
-                  style={styles.footerButton}>
-                  <MaterialIcons name="speed" size={24} color="white" />
-                  <Text style={styles.footerButtonText}>{playbackRate}x</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {}}
-                  style={styles.footerButton}>
-                  <MaterialIcons
-                    name="picture-in-picture-alt"
-                    size={24}
-                    color="white"
-                  />
-                  <Text style={styles.footerButtonText}>PIP</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    setShowSettings(!showSettings);
-                    setActiveTab('quality');
-                  }}
-                  style={styles.footerButton}>
-                  <Ionicons name="ios-resize-outline" size={24} color="white" />
-                  <Text style={styles.footerButtonText}>
-                    {getQualityText()}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={handleResizeMode}
-                  style={styles.footerButton}>
-                  <Ionicons name="expand-outline" size={24} color="white" />
-                  <Text style={styles.footerButtonText}>
-                    {resizeMode === 'contain' ? 'Fit' : 'Fill'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Animated.View>
-
-          {isPlayerLocked && showUnlockButton && (
-            <Animated.View
-              style={[styles.lockButtonContainer, lockButtonStyle]}
-              layout={Layout}>
-              <TouchableOpacity
-                onPress={togglePlayerLock}
-                style={styles.unlockButton}>
-                <Ionicons
-                  name={'lock-closed-outline'}
+                  name={volume === 0 ? 'volume-mute' : 'volume-high'}
                   size={40}
                   color="white"
                 />
-              </TouchableOpacity>
-            </Animated.View>
-          )}
-        </View>
-      </TouchableNativeFeedback>
+                <View style={styles.volumeBar}>
+                  <View
+                    style={[styles.volumeFill, {height: `${volume * 100}%`}]}
+                  />
+                </View>
+              </View>
+            )}
 
+            {showBrightnessIndicator && (
+              <View style={styles.centerIndicator}>
+                <Ionicons name="sunny" size={40} color="white" />
+                <View style={styles.volumeBar}>
+                  <View
+                    style={[
+                      styles.volumeFill,
+                      {
+                        height: `${brightness * 100}%`,
+                        backgroundColor: 'white',
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+            )}
+
+            {showSeekIndicator && (
+              <View style={styles.seekIndicatorContainer}>
+                <Ionicons
+                  name={seekTime > currentTime ? 'play-forward' : 'play-back'}
+                  size={40}
+                  color="white"
+                />
+                <Text style={styles.seekIndicatorText}>
+                  {formatTime(seekTime)}
+                </Text>
+              </View>
+            )}
+
+            <Animated.View
+              style={[styles.controlsOverlay, controlsStyle]}
+              layout={Layout}>
+              <View style={styles.controlsHeader}>
+                <TouchableOpacity
+                  onPress={() => navigation.goBack()}
+                  style={styles.headerButton}>
+                  <Ionicons
+                    name="chevron-back-outline"
+                    size={30}
+                    color="white"
+                  />
+                </TouchableOpacity>
+                <View style={styles.headerTitleContainer}>
+                  <Text style={styles.videoTitleText}>
+                    {title || 'TV Channel'}
+                  </Text>
+                  {subtitle && (
+                    <Text style={styles.videoSubtitleText}>{subtitle}</Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  onPress={togglePlayerLock}
+                  style={[styles.headerButton, styles.lockButton]}>
+                  <Ionicons
+                    name={
+                      isPlayerLocked
+                        ? 'lock-closed-outline'
+                        : 'lock-open-outline'
+                    }
+                    size={24}
+                    color="white"
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.middleControls}>
+                <TouchableOpacity
+                  onPress={handleRewind}
+                  style={styles.middleButton}>
+                  <Ionicons
+                    name="refresh-circle-outline"
+                    size={50}
+                    color="white"
+                    style={styles.rotateLeft}
+                  />
+                  <Text style={styles.middleButtonText}>10</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handlePlayPause}
+                  style={styles.middleButton}>
+                  <Ionicons
+                    name={
+                      isPaused ? 'play-circle-outline' : 'pause-circle-outline'
+                    }
+                    size={80}
+                    color="white"
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleForward}
+                  style={styles.middleButton}>
+                  <Ionicons
+                    name="refresh-circle-outline"
+                    size={50}
+                    color="white"
+                    style={styles.rotateRight}
+                  />
+                  <Text style={styles.middleButtonText}>10</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.controlsFooter}>
+                <View style={styles.timeContainer}>
+                  <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+                  <View style={styles.progressBar}>
+                    <View
+                      style={[
+                        styles.progressIndicator,
+                        {width: `${(currentTime / duration) * 100}%`},
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.timeText}>{formatTime(duration)}</Text>
+                </View>
+
+                <View style={styles.footerButtonsContainer}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowSettings(!showSettings);
+                      setActiveTab('audio');
+                    }}
+                    style={styles.footerButton}>
+                    <Ionicons
+                      name="volume-high-outline"
+                      size={24}
+                      color="white"
+                    />
+                    <Text style={styles.footerButtonText}>
+                      {getAudioText()}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowSettings(!showSettings);
+                      setActiveTab('subtitles');
+                    }}
+                    style={styles.footerButton}>
+                    <Ionicons
+                      name="closed-captioning-outline"
+                      size={24}
+                      color="white"
+                    />
+                    <Text style={styles.footerButtonText}>
+                      {getSubtitleText()}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowSettings(!showSettings);
+                      setActiveTab('speed');
+                    }}
+                    style={styles.footerButton}>
+                    <MaterialIcons name="speed" size={24} color="white" />
+                    <Text style={styles.footerButtonText}>{playbackRate}x</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {}}
+                    style={styles.footerButton}>
+                    <MaterialIcons
+                      name="picture-in-picture-alt"
+                      size={24}
+                      color="white"
+                    />
+                    <Text style={styles.footerButtonText}>PIP</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowSettings(!showSettings);
+                      setActiveTab('quality');
+                    }}
+                    style={styles.footerButton}>
+                    <Ionicons
+                      name="ios-resize-outline"
+                      size={24}
+                      color="white"
+                    />
+                    <Text style={styles.footerButtonText}>
+                      {getQualityText()}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleResizeMode}
+                    style={styles.footerButton}>
+                    <Ionicons name="expand-outline" size={24} color="white" />
+                    <Text style={styles.footerButtonText}>
+                      {resizeMode === 'contain' ? 'Fit' : 'Fill'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </Animated.View>
+
+            {isPlayerLocked && showUnlockButton && (
+              <Animated.View
+                style={[styles.lockButtonContainer, lockButtonStyle]}
+                layout={Layout}>
+                <TouchableOpacity
+                  onPress={togglePlayerLock}
+                  style={styles.unlockButton}>
+                  <Ionicons
+                    name={'lock-closed-outline'}
+                    size={40}
+                    color="white"
+                  />
+                </TouchableOpacity>
+              </Animated.View>
+            )}
+          </View>
+        </TouchableNativeFeedback>
+      </View>
       <Animated.View
         style={[styles.settingsModal, settingsStyle]}
         layout={Layout}>
@@ -1019,20 +1034,19 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
                 <TouchableOpacity
                   style={styles.trackItem}
                   onPress={() => {
-                    setSelectedTextTrackIndex(-1);
+                    handleSelectSubtitle(-1);
                     setShowSettings(false);
                   }}>
                   <Text
                     style={[
                       styles.trackText,
                       {
-                        color:
-                          selectedTextTrackIndex === -1 ? primary : 'white',
+                        color: selectedTextTrack === null ? primary : 'white',
                       },
                     ]}>
                     Off
                   </Text>
-                  {selectedTextTrackIndex === -1 && (
+                  {selectedTextTrack === null && (
                     <MaterialIcons name="check" size={20} color="white" />
                   )}
                 </TouchableOpacity>
@@ -1041,7 +1055,7 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
                     style={styles.trackItem}
                     key={i}
                     onPress={() => {
-                      setSelectedTextTrackIndex(i);
+                      handleSelectSubtitle(i);
                       setShowSettings(false);
                     }}>
                     <Text
@@ -1049,12 +1063,12 @@ const TVPlayerScreen: React.FC<TVPlayerScreenProps> = ({route}) => {
                         styles.trackText,
                         {
                           color:
-                            selectedTextTrackIndex === i ? primary : 'white',
+                            selectedTextTrack?.value === i ? primary : 'white',
                         },
                       ]}>
                       {track.title || track.language || `Subtitle ${i + 1}`}
                     </Text>
-                    {selectedTextTrackIndex === i && (
+                    {selectedTextTrack?.value === i && (
                       <MaterialIcons name="check" size={20} color="white" />
                     )}
                   </TouchableOpacity>
@@ -1284,6 +1298,13 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 24,
     marginLeft: 10,
+  },
+  // NEW STYLE
+  gestureOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 5, // A Z-index higher than the video but lower than the controls
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

@@ -6,7 +6,7 @@ import {
   Dimensions,
   ToastAndroid,
   View,
-  PermissionsAndroid, // Still imported, but its usage will be simplified
+  PermissionsAndroid,
   Platform,
   Linking,
 } from 'react-native';
@@ -21,16 +21,12 @@ import useThemeStore from '../lib/zustand/themeStore';
 import {TextTrackType} from 'react-native-video';
 import {settingsStorage} from '../lib/storage';
 
-// Removed: import RNFS from 'react-native-fs';
-// Removed: import PushNotification from 'react-native-push-notification';
-
 type Props = {
   data: Stream[];
   loading: boolean;
   title: string;
   showModal: boolean;
   setModal: (value: boolean) => void;
-  // Re-added the props from the original file for external downloads
   onPressVideo: (item: any) => void;
   onPressSubs: (item: any) => void;
   /**
@@ -69,8 +65,6 @@ const DownloadBottomSheet = ({
     }
   }, [showModal]);
 
-  // Removed: useEffect for PushNotification.createChannel
-
   /**
    * Attempts to open a given URL in the device's default web browser.
    * This is used when `isExternalDownloadMode` is true.
@@ -86,49 +80,46 @@ const DownloadBottomSheet = ({
   };
 
   /**
-   * Placeholder for requesting download permissions and initiating an internal download.
-   * Without `react-native-fs`, this function will only show toast messages.
+   * Handles the download internally using the 'fetch' API.
    * @param {Stream} item - The stream item to "download".
    * @param {'video' | 'subtitle'} fileType - The type of file being "downloaded".
    */
-  const requestDownloadPermissionAndStart = async (
+  const startInternalDownload = async (
     item: Stream,
     fileType: 'video' | 'subtitle',
   ) => {
-    if (Platform.OS === 'android') {
-      // With RNFS removed, explicit storage permissions are not directly handled by this component.
-      // Modern Android versions (API 29+) do not require WRITE_EXTERNAL_STORAGE for public downloads.
-      // For older versions, if a custom download mechanism were implemented without RNFS,
-      // it would need to handle permissions. For now, we'll just proceed with the placeholder.
+    const {link, title: itemTitle, server} = item;
+    try {
       ToastAndroid.show(
-        'Attempting internal download (functionality is a placeholder without a download library).',
+        `Starting download for ${itemTitle || server}...`,
         ToastAndroid.SHORT,
       );
-      startInternalDownload(item, fileType);
-    } else {
-      // iOS permissions are handled differently. We can proceed with the placeholder directly here.
-      ToastAndroid.show('Starting download...', ToastAndroid.SHORT);
-      startInternalDownload(item, fileType);
-    }
-  };
 
-  /**
-   * Placeholder function for initiating the actual internal download process.
-   * Without `react-native-fs`, this function will only show a toast and close the bottom sheet.
-   * @param {Stream} item - The stream item to "download".
-   * @param {'video' | 'subtitle'} fileType - The type of file being "downloaded".
-   */
-  const startInternalDownload = (
-    item: Stream,
-    fileType: 'video' | 'subtitle',
-  ) => {
-    // This is now purely a placeholder. No actual file download occurs here.
-    console.log(`Attempting to "download" ${fileType}: ${item.link}`);
-    ToastAndroid.show(
-      `"Downloading" ${item.server || item.title}... (Placeholder)`,
-      ToastAndroid.SHORT,
-    );
-    bottomSheetRef.current?.close();
+      const response = await fetch(link);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+
+      // Open the downloaded file in an external app
+      Linking.openURL(objectUrl)
+        .then(() => {
+          ToastAndroid.show(
+            'Download opened in a new window.',
+            ToastAndroid.SHORT,
+          );
+        })
+        .catch(err => {
+          ToastAndroid.show(
+            'Could not open file in another application.',
+            ToastAndroid.SHORT,
+          );
+          console.error('An error occurred opening the file: ', err);
+        });
+    } catch (err) {
+      ToastAndroid.show('Download failed!', ToastAndroid.SHORT);
+      console.error('Download error:', err);
+    } finally {
+      bottomSheetRef.current?.close();
+    }
   };
 
   return (
@@ -215,7 +206,7 @@ const DownloadBottomSheet = ({
                             openLinkInBrowser(item.link);
                           } else {
                             // Otherwise, trigger the placeholder internal "download"
-                            requestDownloadPermissionAndStart(item, 'video');
+                            startInternalDownload(item, 'video');
                           }
                         }}>
                         <Text style={{color: 'white'}}>{item.server}</Text>
@@ -260,10 +251,7 @@ const DownloadBottomSheet = ({
                                       ? 'vtt'
                                       : 'srt',
                                 };
-                                requestDownloadPermissionAndStart(
-                                  subItem,
-                                  'subtitle',
-                                );
+                                startInternalDownload(subItem, 'subtitle');
                               }
                             }}>
                             <Text style={{color: 'white'}}>

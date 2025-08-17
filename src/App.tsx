@@ -25,7 +25,13 @@ import BootSplash from 'react-native-bootsplash';
 import {enableFreeze, enableScreens} from 'react-native-screens';
 import Preferences from './screens/settings/Preference';
 import useThemeStore from './lib/zustand/themeStore';
-import {Dimensions, LogBox, ViewStyle, SafeAreaView} from 'react-native';
+import {
+  Dimensions,
+  LogBox,
+  ViewStyle,
+  SafeAreaView,
+  Platform,
+} from 'react-native';
 import {EpisodeLink} from './lib/providers/types';
 import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import TabBarBackgound from './components/TabBarBackgound';
@@ -59,6 +65,7 @@ import LiveTVScreen from './screens/tv/LiveTVScreen';
 import TVPlayerScreen from './screens/tv/TVPlayerScreen';
 import useAppModeStore from './lib/zustand/appModeStore';
 import VegaTVSettingsScreen from './screens/tv/VegaTVSettingsScreen';
+import * as Application from 'expo-application';
 
 enableScreens(true);
 enableFreeze(true);
@@ -559,6 +566,70 @@ const App = () => {
     }
   }, []);
 
+  // Simple UUID generator as a fallback
+  const generateUUID = () => {
+    // This is a simple implementation, not a true UUID, but it is unique enough for tracking
+    // You may also consider installing a dedicated library like 'react-native-uuid' if you need a
+    // more robust solution.
+    const S4 = () => {
+      return (((1 + Math.random()) * 0x10000) | 0).toString(16).substring(1);
+    };
+    return (
+      S4() +
+      S4() +
+      '-' +
+      S4() +
+      '-' +
+      S4() +
+      '-' +
+      S4() +
+      '-' +
+      S4() +
+      S4() +
+      S4()
+    );
+  };
+
+  // Backend API Call for User Tracking
+  const sendUserPing = async () => {
+    // Android emulator के लिए, 10.0.2.2 आपके होस्ट मशीन के localhost को refer करता है
+    const API_URL = 'http://10.0.2.2:3000/api/user-ping';
+    try {
+      let userId = null;
+      if (Platform.OS === 'android') {
+        userId = Application.androidId;
+      } else if (Platform.OS === 'ios') {
+        userId = await Application.getIosIdForVendorAsync();
+      }
+
+      if (!userId) {
+        console.log('Could not get a valid userId. Generating a random UUID.');
+        userId = generateUUID();
+      }
+
+      const pingData = {
+        userId: userId,
+        platform: Platform.OS,
+      };
+
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(pingData),
+      });
+
+      console.log('User activity logged successfully.');
+    } catch (error) {
+      console.error('Failed to log user activity:', error);
+    }
+  };
+
+  useEffect(() => {
+    sendUserPing();
+  }, []);
+
   return (
     <GlobalErrorBoundary>
       <SafeAreaProvider>
@@ -611,19 +682,17 @@ const App = () => {
                   freezeOnBlur: true,
                   contentStyle: {backgroundColor: 'transparent'},
                 }}>
-                {appMode === 'video' ? (
-                  <Stack.Screen name="TabStack" component={TabStackScreen} />
-                ) : appMode === 'music' ? (
-                  <Stack.Screen
-                    name="MusicRootStack"
-                    component={MusicRootStackScreen}
-                  />
-                ) : (
-                  <Stack.Screen
-                    name="TVRootStack"
-                    component={TVRootStackScreen}
-                  />
-                )}
+                <Stack.Screen name="MainStack">
+                  {() =>
+                    appMode === 'video' ? (
+                      <TabStackScreen />
+                    ) : appMode === 'music' ? (
+                      <MusicRootStackScreen />
+                    ) : (
+                      <TVRootStackScreen />
+                    )
+                  }
+                </Stack.Screen>
                 <Stack.Screen
                   name="Player"
                   component={Player}

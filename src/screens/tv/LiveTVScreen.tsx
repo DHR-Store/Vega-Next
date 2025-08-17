@@ -106,7 +106,6 @@ const LiveTVScreen: React.FC = () => {
       try {
         setLoading(true);
 
-        // List of M3U playlist and JSON API sources
         const sources = [
           'https://iptv-org.github.io/iptv/index.country.m3u',
           'https://iptv-org.github.io/iptv/index.m3u',
@@ -119,47 +118,62 @@ const LiveTVScreen: React.FC = () => {
         const m3uPromises = sources.map(url => fetch(url));
         const jsonPromise = fetch(jsonSource);
 
-        const [m3uResponses, jsonResponse] = await Promise.all([
+        const [m3uResponses, jsonResponse] = await Promise.allSettled([
           Promise.allSettled(m3uPromises),
           jsonPromise,
         ]);
 
-        let allChannels: TVChannel[] = [];
+        // This is the key change: update the state as each data source is processed
+        // to make the initial load feel faster.
         const uniqueChannelUrls = new Set<string>();
 
-        // Process M3U responses
-        for (const response of m3uResponses) {
-          if (response.status === 'fulfilled' && response.value.ok) {
-            const m3uContent = await response.value.text();
-            const parsedChannels = parseM3U(m3uContent);
-            for (const channel of parsedChannels) {
-              if (!uniqueChannelUrls.has(channel.streamUrl)) {
-                uniqueChannelUrls.add(channel.streamUrl);
-                allChannels.push(channel);
+        // Process M3U responses first
+        if (m3uResponses.status === 'fulfilled') {
+          for (const response of m3uResponses.value) {
+            if (response.status === 'fulfilled' && response.value.ok) {
+              const m3uContent = await response.value.text();
+              const parsedChannels = parseM3U(m3uContent);
+              const newChannels = [];
+              for (const channel of parsedChannels) {
+                if (!uniqueChannelUrls.has(channel.streamUrl)) {
+                  uniqueChannelUrls.add(channel.streamUrl);
+                  newChannels.push(channel);
+                }
               }
-            }
-          } else if (response.status === 'rejected') {
-            console.error('Failed to fetch M3U source:', response.reason);
-          } else {
-            console.error('Failed to fetch M3U source:', response.value.status);
-          }
-        }
-
-        // Process JSON response
-        if (jsonResponse.ok) {
-          const jsonContent = await jsonResponse.json();
-          const parsedChannels = parseJsonChannels(jsonContent);
-          for (const channel of parsedChannels) {
-            if (!uniqueChannelUrls.has(channel.streamUrl)) {
-              uniqueChannelUrls.add(channel.streamUrl);
-              allChannels.push(channel);
+              setChannels(prevChannels => [...prevChannels, ...newChannels]);
+            } else if (response.status === 'rejected') {
+              console.error('Failed to fetch M3U source:', response.reason);
+            } else {
+              console.error(
+                'Failed to fetch M3U source:',
+                response.value.status,
+              );
             }
           }
         } else {
-          console.error('Failed to fetch JSON source:', jsonResponse.status);
+          console.error('Failed to fetch M3U sources:', m3uResponses.reason);
         }
 
-        setChannels(allChannels);
+        // Process JSON response
+        if (jsonResponse.status === 'fulfilled' && jsonResponse.value.ok) {
+          const jsonContent = await jsonResponse.value.json();
+          const parsedChannels = parseJsonChannels(jsonContent);
+          const newChannels = [];
+          for (const channel of parsedChannels) {
+            if (!uniqueChannelUrls.has(channel.streamUrl)) {
+              uniqueChannelUrls.add(channel.streamUrl);
+              newChannels.push(channel);
+            }
+          }
+          setChannels(prevChannels => [...prevChannels, ...newChannels]);
+        } else if (jsonResponse.status === 'rejected') {
+          console.error('Failed to fetch JSON source:', jsonResponse.reason);
+        } else {
+          console.error(
+            'Failed to fetch JSON source:',
+            jsonResponse.value.status,
+          );
+        }
       } catch (error) {
         console.error('Failed to fetch or parse channels:', error);
         Alert.alert(
