@@ -16,7 +16,7 @@ export const getBaseUrl = async (providerValue: string) => {
       baseUrl = cachedUrl;
     } else {
       const baseUrlRes = await fetch(
-        'https://himanshu8443.github.io/providers/modflix.json',
+        'https://github.com/0556sagar/vega-providers',
       );
       const baseUrlData = await baseUrlRes.json();
       baseUrl = baseUrlData[providerValue].url;
