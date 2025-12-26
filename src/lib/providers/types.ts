@@ -6,6 +6,7 @@ import * as Crypto from 'expo-crypto';
 export interface ProvidersList {
   name: string;
   value: string;
+  category: string;
   type: string;
   flag: string;
 }

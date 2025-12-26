@@ -64,6 +64,7 @@ export class ExtensionManager {
         version: item.version,
         icon: item.icon || '',
         type: item.type || 'global',
+        category: item.category || '',
         installed: false,
       }));
 

@@ -68,14 +68,14 @@ interface FirebaseConfig {
 
 // --- FALLBACK CONFIGURATION ---
 const FALLBACK_FIREBASE_CONFIG: FirebaseConfig = {
-  apiKey: 'YOUR_API_KEY',
-  authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',
-  databaseURL: 'YOUR_DATA BASE_URL',
-  projectId: 'YOUR_PROJECT_ID',
-  storageBucket: 'YOUR_BUCKET_ID',
-  messagingSenderId: 'YOUR_MESSAGING_ID',
-  appId: 'YOUR_APP_ID',
-  measurementId: 'YOUR_MEASURE_ID',
+  apiKey: 'AIzaSyAesuaUddC4aXLjyMRl7VpFG2-0R36exRU',
+  authDomain: 'together-5dde5.firebaseapp.com',
+  databaseURL: 'https://together-5dde5-default-rtdb.firebaseio.com',
+  projectId: 'together-5dde5',
+  storageBucket: 'together-5dde5.appspot.com',
+  messagingSenderId: '435182801394',
+  appId: '1:435182801394:web:9e283ba6c8949aa70d9b6b',
+  measurementId: 'G-ZM6BDPE2M2',
 };
 
 // --- UTILITY FOR SANITIZING FIREBASE KEYS ---

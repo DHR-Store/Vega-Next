@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useRef} from 'react';
+import React, {useState, useEffect, useRef, useMemo} from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,10 @@ import {
   Alert,
   RefreshControl,
   Image,
+  TextInput,
+  ScrollView,
+  Modal,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {SettingsStackParamList} from '../../App';
@@ -17,6 +21,7 @@ import {
   MaterialIcons,
   Feather,
   AntDesign,
+  Ionicons,
 } from '@expo/vector-icons';
 import useThemeStore from '../../lib/zustand/themeStore';
 import useContentStore from '../../lib/zustand/contentStore';
@@ -36,6 +41,20 @@ import RenderProviderFlagIcon from '../../components/RenderProviderFLagIcon';
 type Props = NativeStackScreenProps<SettingsStackParamList, 'Extensions'>;
 
 type TabType = 'installed' | 'available';
+type CategoryType =
+  | 'All'
+  | 'Movie/TVShow'
+  | 'Anime'
+  | 'TVShow'
+  | 'KDrama'
+  | 'CDrama'
+  | 'Donghua';
+
+// Extend the ProviderExtension type locally to include category if it's missing in the source
+interface ExtendedProvider extends ProviderExtension {
+  category?: string;
+  genres?: string[];
+}
 
 const Extensions = ({navigation}: Props) => {
   const {primary} = useThemeStore(state => state);
@@ -47,6 +66,8 @@ const Extensions = ({navigation}: Props) => {
     setInstalledProviders,
     setAvailableProviders,
   } = useContentStore(state => state);
+
+  // States
   const [activeTab, setActiveTab] = useState<TabType>(
     installedProviders?.length > 0 ? 'installed' : 'available',
   );
@@ -58,7 +79,13 @@ const Extensions = ({navigation}: Props) => {
   const [refreshing, setRefreshing] = useState(false);
   const [isPerformingBulkAction, setIsPerformingBulkAction] = useState(false);
 
-  // Use a ref to track if the component is mounted to prevent state updates on unmounted components
+  // Filter States
+  const [selectedCategory, setSelectedCategory] = useState<CategoryType>('All');
+  const [selectedCountry, setSelectedCountry] = useState<string>('All'); // New Country State
+  const [searchQuery, setSearchQuery] = useState(''); // Renamed for clarity
+  const [isCountryModalVisible, setIsCountryModalVisible] = useState(false); // Modal State
+
+  // Use a ref to track if the component is mounted
   const isMounted = useRef(true);
 
   // Load providers on component mount
@@ -71,7 +98,6 @@ const Extensions = ({navigation}: Props) => {
           loadProviders();
           await checkForUpdates();
         }
-        // Try to fetch latest providers if we don't have any
         if (
           isMounted.current &&
           (!availableProviders || availableProviders.length === 0)
@@ -79,7 +105,6 @@ const Extensions = ({navigation}: Props) => {
           await handleRefresh();
         }
       } catch (error) {
-        // Still try to load from cache if initialization fails
         if (isMounted.current) {
           loadProviders();
         }
@@ -88,7 +113,6 @@ const Extensions = ({navigation}: Props) => {
 
     initializeExtensions();
 
-    // Cleanup function to set the ref to false when the component unmounts
     return () => {
       isMounted.current = false;
     };
@@ -140,7 +164,6 @@ const Extensions = ({navigation}: Props) => {
           `${provider.display_name} has been updated successfully!`,
         );
 
-        // Update the active provider if it was the one being updated
         if (activeExtensionProvider?.value === provider.value) {
           setActiveExtensionProvider(provider);
         }
@@ -167,6 +190,24 @@ const Extensions = ({navigation}: Props) => {
       });
     }
     setActiveTab(tab);
+    // Optional: Reset filters on tab change
+    // setSelectedCategory('All');
+    // setSearchQuery('');
+  };
+
+  const handleCategorySelect = (category: CategoryType) => {
+    if (settingsStorage.isHapticFeedbackEnabled()) {
+      ReactNativeHapticFeedback.trigger('effectTick', {
+        enableVibrateFallback: true,
+        ignoreAndroidSystemSettings: false,
+      });
+    }
+    setSelectedCategory(category);
+  };
+
+  const handleCountrySelect = (country: string) => {
+    setSelectedCountry(country);
+    setIsCountryModalVisible(false);
   };
 
   const handleInstallProvider = async (provider: ProviderExtension) => {
@@ -237,7 +278,6 @@ const Extensions = ({navigation}: Props) => {
               extensionStorage.getInstalledProviders() || [],
             );
 
-            // If this was the active provider, clear it
             if (activeExtensionProvider?.value === provider?.value) {
               setActiveExtensionProvider(
                 extensionStorage.getInstalledProviders()[0] || {
@@ -276,7 +316,6 @@ const Extensions = ({navigation}: Props) => {
     try {
       const providers = await extensionManager.fetchManifest(true);
       if (isMounted.current) {
-        // Update available providers in storage and state
         extensionStorage.setAvailableProviders(providers);
         setAvailableProviders(providers);
         loadProviders();
@@ -297,7 +336,7 @@ const Extensions = ({navigation}: Props) => {
     }
   };
 
-  // --- NEW BULK ACTION FUNCTIONS ---
+  // --- BULK ACTION FUNCTIONS ---
   const handleEnableAllProviders = async () => {
     if (settingsStorage.isHapticFeedbackEnabled()) {
       ReactNativeHapticFeedback.trigger('effectClick', {
@@ -331,7 +370,6 @@ const Extensions = ({navigation}: Props) => {
               setIsPerformingBulkAction(true);
             }
             try {
-              // Use Promise.all to install all providers in parallel
               await Promise.all(
                 availableToInstall.map(provider =>
                   extensionManager.installProvider(provider),
@@ -386,7 +424,6 @@ const Extensions = ({navigation}: Props) => {
           text: 'Uninstall All',
           style: 'destructive',
           onPress: () => {
-            // Create a new function to uninstall without alerts to prevent multiple dialogs
             const uninstallWithoutAlert = (provider: ProviderExtension) => {
               if (!provider || !provider.value) return;
               extensionStorage.uninstallProvider(provider.value);
@@ -401,7 +438,80 @@ const Extensions = ({navigation}: Props) => {
     );
   };
 
-  const renderProviderCard = ({item}: {item: ProviderExtension}) => {
+  // --- FILTER LOGIC ---
+
+  // 1. Get Unique Countries for the Dropdown
+  const uniqueCountries = useMemo(() => {
+    const allProviders = [
+      ...(installedProviders || []),
+      ...(availableProviders || []),
+    ] as ExtendedProvider[];
+
+    const types = new Set<string>();
+    allProviders.forEach(p => {
+      if (p.type) types.add(p.type.toLowerCase());
+    });
+
+    // Capitalize first letter for display
+    const formattedTypes = Array.from(types).map(
+      t => t.charAt(0).toUpperCase() + t.slice(1),
+    );
+
+    return ['All', ...formattedTypes.sort()];
+  }, [installedProviders, availableProviders]);
+
+  const getFilteredData = () => {
+    const sourceData =
+      activeTab === 'installed'
+        ? installedProviders || []
+        : availableProviders || [];
+
+    // Cast item to ExtendedProvider to access optional category fields safely
+    return sourceData.filter((item: ExtendedProvider) => {
+      if (!item || !item.value) return false;
+
+      // 1. Filter by Category
+      if (selectedCategory !== 'All') {
+        const itemCategory = item.category?.toLowerCase();
+        const targetCategory = selectedCategory.toLowerCase();
+
+        // Strict check: if category is 'movie', it must match 'movie'
+        if (itemCategory !== targetCategory) {
+          return false;
+        }
+      }
+
+      // 2. Filter by Country (Type) using Dropdown selection
+      if (selectedCountry !== 'All') {
+        const itemType = item.type?.toLowerCase();
+        const targetType = selectedCountry.toLowerCase();
+        if (itemType !== targetType) {
+          return false;
+        }
+      }
+
+      // 3. Filter by Search (Name OR Type)
+      if (searchQuery.trim().length > 0) {
+        const searchLower = searchQuery.toLowerCase();
+
+        const typeMatch = item.type?.toLowerCase().includes(searchLower);
+        const nameMatch = item.display_name
+          ?.toLowerCase()
+          .includes(searchLower);
+
+        // Return true if EITHER matches
+        if (!typeMatch && !nameMatch) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  };
+
+  const currentData = getFilteredData();
+
+  const renderProviderCard = ({item}: {item: ExtendedProvider}) => {
     if (!item || !item.value) return null;
     const isActive = activeExtensionProvider?.value === item.value;
     const isInstalled = extensionStorage.isProviderInstalled(item.value);
@@ -445,13 +555,18 @@ const Extensions = ({navigation}: Props) => {
                 </View>
               )}
             </View>
-            <Text className="text-gray-400 text-sm ">
-              Version{' '}
-              <Text className="text-white font-medium">
-                {item.version || 'Unknown'}
-              </Text>{' '}
-              • {item.type || 'Unknown'}
-            </Text>
+            <View className="flex-row items-center flex-wrap gap-1 mt-1">
+              <Text className="text-gray-400 text-xs">
+                v{item.version || '?'} • {item.type?.toUpperCase() || 'GLOBAL'}
+              </Text>
+              {item.category && (
+                <View className="bg-gray-800 px-1.5 py-0.5 rounded ml-1">
+                  <Text className="text-gray-300 text-[10px] capitalize">
+                    {item.category}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
           {/* Right: Buttons */}
           <View className="flex-row gap-3 items-center">
@@ -524,15 +639,21 @@ const Extensions = ({navigation}: Props) => {
       </View>
     );
   };
-  const currentData =
-    activeTab === 'installed'
-      ? (installedProviders || []).filter(item => item && item.value)
-      : (availableProviders || []).filter(item => item && item.value);
 
+  const categories: CategoryType[] = [
+    'All',
+    'Movie/TVShow',
+    'Anime',
+    'TVShow',
+    'KDrama',
+    'CDrama',
+    'Donghua',
+  ];
+  // Dynamic Categories logic
   return (
     <View className="flex-1 bg-black pt-10 pb-16">
       <StatusBar backgroundColor="black" barStyle="light-content" />
-      {/* Header with new bulk action options */}
+      {/* Header */}
       <View className="flex-row items-center justify-between p-4 border-b border-gray-800">
         <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
           <AntDesign name="arrowleft" size={24} color="white" />
@@ -568,6 +689,7 @@ const Extensions = ({navigation}: Props) => {
           </TouchableOpacity>
         </View>
       </View>
+
       {/* Tabs */}
       <View className="flex-row bg-quaternary mx-4 mt-4 rounded-xl">
         <TouchableOpacity
@@ -600,6 +722,77 @@ const Extensions = ({navigation}: Props) => {
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* --- FILTERS SECTION --- */}
+      <View className="mt-4 mx-4">
+        {/* Search Bar */}
+        <View className="flex-row items-center bg-gray-900 rounded-xl px-3 py-2 border border-gray-800 mb-3">
+          <Ionicons name="search" size={20} color="gray" />
+          <TextInput
+            placeholder="Search provider name or type..."
+            placeholderTextColor="gray"
+            className="flex-1 text-white ml-2 text-base"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={18} color="gray" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Category Chips & Country Select */}
+        <View className="flex-row items-center gap-2">
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            className="flex-grow"
+            contentContainerStyle={{gap: 8}}>
+            {categories.map(cat => (
+              <TouchableOpacity
+                key={cat}
+                onPress={() => handleCategorySelect(cat)}
+                className={`px-4 py-1.5 rounded-full border ${
+                  selectedCategory === cat
+                    ? 'bg-primary border-primary'
+                    : 'bg-gray-900 border-gray-700'
+                }`}>
+                <Text
+                  className={`${
+                    selectedCategory === cat
+                      ? 'text-white font-semibold'
+                      : 'text-gray-400'
+                  }`}>
+                  {cat}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* Country Selector Button (Vertical Type Selection) */}
+          <TouchableOpacity
+            onPress={() => setIsCountryModalVisible(true)}
+            className={`px-3 py-1.5 rounded-full border flex-row items-center gap-1 ${
+              selectedCountry !== 'All'
+                ? 'bg-gray-800 border-primary'
+                : 'bg-gray-900 border-gray-700'
+            }`}>
+            <Text
+              className={
+                selectedCountry !== 'All' ? 'text-white' : 'text-gray-400'
+              }>
+              {selectedCountry === 'All' ? 'Country' : selectedCountry}
+            </Text>
+            <Ionicons
+              name="chevron-down"
+              size={14}
+              color={selectedCountry !== 'All' ? 'white' : 'gray'}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Provider list */}
       <FlatList
         data={currentData}
@@ -623,18 +816,64 @@ const Extensions = ({navigation}: Props) => {
               color="gray"
             />
             <Text className="text-gray-400 text-lg mt-4">
-              {activeTab === 'installed'
-                ? 'No providers installed'
-                : 'No providers available'}
+              No matching providers found
             </Text>
             <Text className="text-gray-500 text-sm mt-2 text-center px-8">
-              {activeTab === 'installed'
-                ? 'Install providers from the Available tab to get started'
-                : 'Pull to refresh to check for available providers'}
+              Try adjusting your filters or search terms
             </Text>
           </View>
         }
       />
+
+      {/* --- Country Selection Modal (Vertical List) --- */}
+      <Modal
+        visible={isCountryModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsCountryModalVisible(false)}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => setIsCountryModalVisible(false)}
+          className="flex-1 bg-black/60 justify-center items-center p-4">
+          <TouchableWithoutFeedback>
+            <View className="bg-gray-900 w-3/4 max-h-[60%] rounded-2xl border border-gray-700 overflow-hidden">
+              <View className="p-4 border-b border-gray-800 flex-row justify-between items-center">
+                <Text className="text-white font-bold text-lg">
+                  Select Country
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setIsCountryModalVisible(false)}>
+                  <Ionicons name="close" size={24} color="gray" />
+                </TouchableOpacity>
+              </View>
+              <ScrollView contentContainerStyle={{padding: 8}}>
+                {uniqueCountries.map(country => (
+                  <TouchableOpacity
+                    key={country}
+                    onPress={() => handleCountrySelect(country)}
+                    className={`p-4 rounded-xl mb-1 flex-row justify-between items-center ${
+                      selectedCountry === country
+                        ? 'bg-primary/20'
+                        : 'bg-transparent'
+                    }`}>
+                    <Text
+                      className={`${
+                        selectedCountry === country
+                          ? 'text-primary font-bold'
+                          : 'text-gray-300'
+                      }`}>
+                      {country}
+                    </Text>
+                    {selectedCountry === country && (
+                      <Ionicons name="checkmark" size={20} color={primary} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </TouchableWithoutFeedback>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
