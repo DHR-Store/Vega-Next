@@ -1,12 +1,13 @@
-import {View, Text} from 'react-native';
+import {View, Text, Image, TouchableOpacity} from 'react-native';
 import React from 'react';
 import useContentStore from '../lib/zustand/contentStore';
 import {ScrollView} from 'moti';
 import useThemeStore from '../lib/zustand/themeStore';
-import {TouchableOpacity} from 'react-native';
 import {DrawerLayout} from 'react-native-gesture-handler';
 import {BlurView} from 'expo-blur';
 import {MaterialIcons} from '@expo/vector-icons';
+// Make sure this path is correct relative to where ProviderDrawer is located
+import RenderProviderFlagIcon from '../components/RenderProviderFLagIcon';
 
 const ProviderDrawer = ({
   drawerRef,
@@ -25,43 +26,82 @@ const ProviderDrawer = ({
       blurReductionFactor={5}
       tint="dark"
       className="flex-1">
-      <View className="mt-8 px-4 pb-4 border-b border-white/10">
-        <Text className="text-white text-2xl font-bold">Select Provider</Text>
-        <Text className="text-gray-400 mt-1 text-sm">Content source</Text>
+      {/* Header */}
+      <View className="mt-10 px-4 pb-2 border-b border-white/10">
+        <Text className="text-white text-lg font-semibold tracking-wide">
+          Select Provider
+        </Text>
+        <Text className="text-gray-400 mt-0.7 text-xs">
+          Choose your content source
+        </Text>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} className="flex-1 px-2">
-        {installedProviders.map(item => (
-          <TouchableOpacity
-            key={item.value}
-            onPress={() => {
-              setProvider(item);
-              drawerRef.current?.closeDrawer();
-            }}
-            className={`flex-row items-center justify-between p-4 my-1 rounded-lg ${
-              provider.value === item.value ? 'bg-white/10' : 'bg-transparent'
-            }`}>
-            <View className="flex-row items-center">
-              <MaterialIcons
-                name="movie"
-                size={20}
-                color={provider.value === item.value ? primary : '#888'}
-              />
-              <Text
-                className={`ml-3 text-base ${
-                  provider.value === item.value
-                    ? 'text-white font-medium'
-                    : 'text-gray-400'
-                }`}>
-                {item.display_name}
-              </Text>
-            </View>
-            {provider.value === item.value && (
-              <MaterialIcons name="check" size={20} color={primary} />
-            )}
-          </TouchableOpacity>
-        ))}
-        <View className="h-16" />
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        className="flex-1 px-3 mt-2">
+        {installedProviders.map(item => {
+          const isActive = provider.value === item.value;
+
+          return (
+            <TouchableOpacity
+              key={item.value}
+              onPress={() => {
+                setProvider(item);
+                drawerRef.current?.closeDrawer();
+              }}
+              activeOpacity={0.7}
+              className={`flex-row items-center justify-between p-3 my-1.5 rounded-2xl border ${
+                isActive
+                  ? 'bg-white/10 border-white/10'
+                  : 'bg-transparent border-transparent'
+              }`}>
+              <View className="flex-row items-center flex-1 gap-3">
+                {/* --- Dynamic Icon Logic from Extensions.tsx --- */}
+                {item.icon ? (
+                  <Image
+                    source={{uri: item.icon}}
+                    className="w-10 h-10 rounded-xl bg-gray-800"
+                    style={{
+                      resizeMode: 'cover',
+                      borderWidth: 1,
+                      borderColor: isActive ? primary : '#333',
+                    }}
+                  />
+                ) : (
+                  <View
+                    className="w-10 h-10 justify-center items-center rounded-xl bg-gray-800 border border-gray-700"
+                    style={{borderColor: isActive ? primary : '#333'}}>
+                    <RenderProviderFlagIcon type={item.type} />
+                  </View>
+                )}
+
+                <View className="flex-1 justify-center">
+                  <Text
+                    numberOfLines={1}
+                    className={`text-base font-semibold ${
+                      isActive ? 'text-white' : 'text-gray-300'
+                    }`}>
+                    {item.display_name}
+                  </Text>
+                  <Text className="text-[10px] text-gray-500 uppercase tracking-wider">
+                    {item.type || 'Global'}{' '}
+                    {item.version ? `• v${item.version}` : ''}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Selection Indicator */}
+              {isActive && (
+                <View
+                  className="w-6 h-6 rounded-full items-center justify-center ml-2"
+                  style={{backgroundColor: primary}}>
+                  <MaterialIcons name="check" size={14} color="white" />
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+        <View className="h-20" />
       </ScrollView>
     </BlurView>
   );

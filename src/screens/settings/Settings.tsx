@@ -33,6 +33,7 @@ import {
   AntDesign,
   Feather,
   MaterialIcons,
+  Ionicons,
 } from '@expo/vector-icons';
 import useThemeStore from '../../lib/zustand/themeStore';
 import useWatchHistoryStore from '../../lib/zustand/watchHistrory';
@@ -112,6 +113,19 @@ const getWatchTogetherMode = () => {
 
 const setWatchTogetherModeStorage = (mode: boolean) => {
   cacheStorageService.setString(KEY_WATCH_TOGETHER, String(mode));
+};
+// -----------------------------------------------------------
+
+// --- NETWORK PROXY PERSISTENCE ---
+const KEY_NETWORK_PROXY = 'networkProxyMode';
+
+const getNetworkProxyMode = () => {
+  const modeStr = cacheStorageService.getString(KEY_NETWORK_PROXY);
+  return modeStr === 'true' ? true : false;
+};
+
+const setNetworkProxyModeStorage = (mode: boolean) => {
+  cacheStorageService.setString(KEY_NETWORK_PROXY, String(mode));
 };
 // -----------------------------------------------------------
 
@@ -197,8 +211,12 @@ const Settings = ({navigation}: Props) => {
   const {clearHistory} = useWatchHistoryStore(state => state);
   const {appMode, setAppMode} = useAppModeStore(state => state);
 
+  // States
   const [watchTogetherMode, setWatchTogetherMode] = useState(
     getWatchTogetherMode(),
+  );
+  const [networkProxyMode, setNetworkProxyMode] = useState(
+    getNetworkProxyMode(),
   );
   const [syncLink, setSyncLink] = useState('');
 
@@ -265,6 +283,7 @@ const Settings = ({navigation}: Props) => {
       });
     }
     cacheStorageService.clearAll();
+    ToastAndroid.show('Cache Cleared', ToastAndroid.SHORT);
   }, []);
 
   const clearHistoryHandler = useCallback(() => {
@@ -275,6 +294,7 @@ const Settings = ({navigation}: Props) => {
       });
     }
     clearHistory();
+    ToastAndroid.show('History Cleared', ToastAndroid.SHORT);
   }, [clearHistory]);
 
   const toggleWatchTogether = useCallback(() => {
@@ -289,6 +309,26 @@ const Settings = ({navigation}: Props) => {
       });
     }
   }, [watchTogetherMode]);
+
+  // --- PROXY TOGGLE ---
+  const toggleNetworkProxy = useCallback(() => {
+    const newState = !networkProxyMode;
+    setNetworkProxyMode(newState);
+    setNetworkProxyModeStorage(newState);
+
+    if (settingsStorage.isHapticFeedbackEnabled()) {
+      ReactNativeHapticFeedback.trigger('impactMedium', {
+        enableVibrateFallback: true,
+        ignoreAndroidSystemSettings: false,
+      });
+    }
+
+    ToastAndroid.show(
+      newState ? 'Secure Proxy Enabled' : 'Secure Proxy Disabled',
+      ToastAndroid.SHORT,
+    );
+  }, [networkProxyMode]);
+  // --------------------
 
   // --- UPDATED PARSING LOGIC TO PREVENT CRASH ---
   const parseSyncLink = (link: string) => {
@@ -479,6 +519,42 @@ const Settings = ({navigation}: Props) => {
           <NotificationPrompt />
         </AnimatedSection>
 
+        {/* --- NEW NETWORK / PROXY SECTION --- */}
+        <AnimatedSection delay={120}>
+          <View className="mb-6 flex-col gap-3">
+            <Text className="text-gray-400 text-sm mb-1">
+              Network & Connection
+            </Text>
+            <View className="bg-[#1A1A1A] rounded-xl overflow-hidden">
+              <View className="flex-row items-center justify-between p-4">
+                <View className="flex-row items-center flex-1 pr-2">
+                  <MaterialCommunityIcons
+                    name="shield-check-outline"
+                    size={22}
+                    color={primary}
+                  />
+                  <View className="flex-col ml-3 flex-1">
+                    <Text className="text-white text-base">
+                      Secure Proxy (VPN Mode)
+                    </Text>
+                    <Text className="text-gray-400 text-xs mt-0.5">
+                      Bypass ISP blocks (Jio, etc) via DoH.
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  trackColor={{false: '#767577', true: primary}}
+                  thumbColor={networkProxyMode ? '#f4f3f4' : '#f4f3f4'}
+                  ios_backgroundColor="#3e3e3e"
+                  onValueChange={toggleNetworkProxy}
+                  value={networkProxyMode}
+                />
+              </View>
+            </View>
+          </View>
+        </AnimatedSection>
+        {/* ----------------------------------- */}
+
         {appMode === 'video' && (
           <AnimatedSection delay={150}>
             <View className="mb-6 flex-col gap-3">
@@ -660,6 +736,14 @@ const Settings = ({navigation}: Props) => {
                 icon={<AntDesign name="info" />}
                 text="Error and Suggestions"
                 url="https://radio-nu-five.vercel.app/"
+                iconColor={primary}
+              />
+              <ExternalLinkRow
+                icon={
+                  <AntDesign name="customerservice" size={20} color={primary} />
+                }
+                text="Vega-Next-AI(Help)"
+                url="https://vega-next-ai.vercel.app/"
                 iconColor={primary}
               />
               <ExternalLinkRow

@@ -17,7 +17,7 @@ buildscript {
     }
 
      dependencies {
-        classpath("com.android.tools.build:gradle:8.0.2")
+        classpath("com.android.tools.build:gradle:8.7.0")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("com.google.gms:google-services:4.3.15")
@@ -48,7 +48,7 @@ subprojects {
     project.configurations.all {
         resolutionStrategy.eachDependency { details ->
             if (details.requested.group == 'com.facebook.react' && details.requested.name.contains('react-native')) {
-                details.useVersion "0.71.15" // Replace with your RN version
+                details.useVersion "0.76.9" // Replace with your RN version
             }
         }
     }

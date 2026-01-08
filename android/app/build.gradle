@@ -37,7 +37,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 146
-        versionName "3.4.2"
+        versionName "3.4.3"
 
         // OneSignal placeholders
         manifestPlaceholders = [

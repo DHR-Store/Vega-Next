@@ -68,14 +68,14 @@ interface FirebaseConfig {
 
 // --- FALLBACK CONFIGURATION ---
 const FALLBACK_FIREBASE_CONFIG: FirebaseConfig = {
-  apiKey: 'Your_key',
-  authDomain: 'Your_Domain',
-  databaseURL: 'Your_URL',
-  projectId: 'Your_ID',
-  storageBucket: 'Your_Bucket',
-  messagingSenderId: 'Your_ID',
-  appId: 'Your App_ID',
-  measurementId: 'Your_MEasure',
+  apiKey: 'Your_API_Key_Here',
+  authDomain: 'Your_Auth_Domain_Here',
+  databaseURL: 'https://together-5dde5-default-rtdb.firebaseio.com',
+  projectId: 'your-project-id',
+  storageBucket: 'together-5dde5.appspot.com',
+  messagingSenderId: 'your-messaging-sender-id',
+  appId: 'Your_App_ID_Here',
+  measurementId: 'Your_Measurement_ID_Here',
 };
 
 // --- UTILITY FOR SANITIZING FIREBASE KEYS ---
@@ -675,11 +675,10 @@ const Player = ({route}: Props): React.JSX.Element => {
 
   const [activeEpisode, setActiveEpisode] = useState(initialActiveEpisode);
 
+  // FIX: Removed 'activeEpisode' from dependencies so it doesn't reset when you click Next
   useEffect(() => {
-    if (initialActiveEpisode?.link !== activeEpisode?.link) {
-      setActiveEpisode(initialActiveEpisode);
-    }
-  }, [initialActiveEpisode, activeEpisode]);
+    setActiveEpisode(initialActiveEpisode);
+  }, [initialActiveEpisode]);
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -1261,6 +1260,7 @@ const Player = ({route}: Props): React.JSX.Element => {
       setActiveEpisode(nextEpisode);
       hasSetInitialTracksRef.current = false;
       hasSkippedIntroRef.current = false;
+
       ToastAndroid.show(
         `Starting next episode: ${nextEpisode.title}`,
         ToastAndroid.SHORT,
@@ -1770,7 +1770,14 @@ const Player = ({route}: Props): React.JSX.Element => {
           onTouchMove={e => e.stopPropagation()}
           onTouchEnd={e => e.stopPropagation()}>
           {showPlayer && (
-            <VideoPlayer key={keyForPlayer} {...videoPlayerProps} />
+            <VideoPlayer
+              key={
+                activeEpisode?.link
+                  ? activeEpisode.link + keyForPlayer
+                  : keyForPlayer
+              }
+              {...videoPlayerProps}
+            />
           )}
         </TouchableOpacity>
 
@@ -2359,6 +2366,12 @@ const Player = ({route}: Props): React.JSX.Element => {
                 <TouchableOpacity
                   className="flex-row gap-2 items-center rounded-md my-1 overflow-hidden ml-2"
                   onPress={async () => {
+                    // FIX: Prevent video from keeping playing in background
+                    const wasPlaying = isPlaying;
+                    if (wasPlaying) {
+                      setIsPlaying(false);
+                      playerRef.current?.pause();
+                    }
                     try {
                       const res = await DocumentPicker.getDocumentAsync({
                         type: [
@@ -2381,6 +2394,7 @@ const Player = ({route}: Props): React.JSX.Element => {
                           uri: asset.uri,
                         };
                         setExternalSubs((prev: any) => [track, ...prev]);
+                        ToastAndroid.show('Subtitle Added', ToastAndroid.SHORT);
                       }
                     } catch (err) {
                       console.log(err);
