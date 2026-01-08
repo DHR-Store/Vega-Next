@@ -13,6 +13,7 @@ import {
   ScrollView,
   Modal,
   TouchableWithoutFeedback,
+  Dimensions,
 } from 'react-native';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {SettingsStackParamList} from '../../App';
@@ -41,16 +42,10 @@ import RenderProviderFlagIcon from '../../components/RenderProviderFLagIcon';
 type Props = NativeStackScreenProps<SettingsStackParamList, 'Extensions'>;
 
 type TabType = 'installed' | 'available';
-type CategoryType =
-  | 'All'
-  | 'Movie/TVShow'
-  | 'Anime'
-  | 'TVShow'
-  | 'KDrama'
-  | 'CDrama'
-  | 'Donghua';
+// CategoryType is now dynamic string, but we default to 'All'
+type CategoryType = string;
 
-// Extend the ProviderExtension type locally to include category if it's missing in the source
+// Extend the ProviderExtension type locally
 interface ExtendedProvider extends ProviderExtension {
   category?: string;
   genres?: string[];
@@ -81,9 +76,9 @@ const Extensions = ({navigation}: Props) => {
 
   // Filter States
   const [selectedCategory, setSelectedCategory] = useState<CategoryType>('All');
-  const [selectedCountry, setSelectedCountry] = useState<string>('All'); // New Country State
-  const [searchQuery, setSearchQuery] = useState(''); // Renamed for clarity
-  const [isCountryModalVisible, setIsCountryModalVisible] = useState(false); // Modal State
+  const [selectedCountry, setSelectedCountry] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isCountryModalVisible, setIsCountryModalVisible] = useState(false);
 
   // Use a ref to track if the component is mounted
   const isMounted = useRef(true);
@@ -190,9 +185,6 @@ const Extensions = ({navigation}: Props) => {
       });
     }
     setActiveTab(tab);
-    // Optional: Reset filters on tab change
-    // setSelectedCategory('All');
-    // setSearchQuery('');
   };
 
   const handleCategorySelect = (category: CategoryType) => {
@@ -438,9 +430,9 @@ const Extensions = ({navigation}: Props) => {
     );
   };
 
-  // --- FILTER LOGIC ---
+  // --- DYNAMIC DATA LOGIC ---
 
-  // 1. Get Unique Countries for the Dropdown
+  // 1. Get Unique Countries for the Dropdown (Dynamic)
   const uniqueCountries = useMemo(() => {
     const allProviders = [
       ...(installedProviders || []),
@@ -452,12 +444,34 @@ const Extensions = ({navigation}: Props) => {
       if (p.type) types.add(p.type.toLowerCase());
     });
 
-    // Capitalize first letter for display
     const formattedTypes = Array.from(types).map(
       t => t.charAt(0).toUpperCase() + t.slice(1),
     );
 
     return ['All', ...formattedTypes.sort()];
+  }, [installedProviders, availableProviders]);
+
+  // 2. Get Unique Categories for the Chips (Dynamic)
+  const uniqueCategories = useMemo(() => {
+    const allProviders = [
+      ...(installedProviders || []),
+      ...(availableProviders || []),
+    ] as ExtendedProvider[];
+
+    const categories = new Set<string>();
+    allProviders.forEach(p => {
+      // Handle cases where category might be null or mixed case
+      if (p.category) {
+        // Normalize: "Anime" and "anime" -> "Anime"
+        const cat =
+          p.category.charAt(0).toUpperCase() +
+          p.category.slice(1).toLowerCase();
+        categories.add(cat);
+      }
+    });
+
+    // Convert to array, sort, and prepend 'All'
+    return ['All', ...Array.from(categories).sort()];
   }, [installedProviders, availableProviders]);
 
   const getFilteredData = () => {
@@ -466,7 +480,6 @@ const Extensions = ({navigation}: Props) => {
         ? installedProviders || []
         : availableProviders || [];
 
-    // Cast item to ExtendedProvider to access optional category fields safely
     return sourceData.filter((item: ExtendedProvider) => {
       if (!item || !item.value) return false;
 
@@ -474,14 +487,12 @@ const Extensions = ({navigation}: Props) => {
       if (selectedCategory !== 'All') {
         const itemCategory = item.category?.toLowerCase();
         const targetCategory = selectedCategory.toLowerCase();
-
-        // Strict check: if category is 'movie', it must match 'movie'
         if (itemCategory !== targetCategory) {
           return false;
         }
       }
 
-      // 2. Filter by Country (Type) using Dropdown selection
+      // 2. Filter by Country (Type)
       if (selectedCountry !== 'All') {
         const itemType = item.type?.toLowerCase();
         const targetType = selectedCountry.toLowerCase();
@@ -490,16 +501,14 @@ const Extensions = ({navigation}: Props) => {
         }
       }
 
-      // 3. Filter by Search (Name OR Type)
+      // 3. Filter by Search
       if (searchQuery.trim().length > 0) {
         const searchLower = searchQuery.toLowerCase();
-
         const typeMatch = item.type?.toLowerCase().includes(searchLower);
         const nameMatch = item.display_name
           ?.toLowerCase()
           .includes(searchLower);
 
-        // Return true if EITHER matches
         if (!typeMatch && !nameMatch) {
           return false;
         }
@@ -640,16 +649,6 @@ const Extensions = ({navigation}: Props) => {
     );
   };
 
-  const categories: CategoryType[] = [
-    'All',
-    'Movie/TVShow',
-    'Anime',
-    'TVShow',
-    'KDrama',
-    'CDrama',
-    'Donghua',
-  ];
-  // Dynamic Categories logic
   return (
     <View className="flex-1 bg-black pt-10 pb-16">
       <StatusBar backgroundColor="black" barStyle="light-content" />
@@ -744,12 +743,13 @@ const Extensions = ({navigation}: Props) => {
 
         {/* Category Chips & Country Select */}
         <View className="flex-row items-center gap-2">
+          {/* Dynamic Categories ScrollView */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             className="flex-grow"
             contentContainerStyle={{gap: 8}}>
-            {categories.map(cat => (
+            {uniqueCategories.map(cat => (
               <TouchableOpacity
                 key={cat}
                 onPress={() => handleCategorySelect(cat)}
@@ -770,7 +770,7 @@ const Extensions = ({navigation}: Props) => {
             ))}
           </ScrollView>
 
-          {/* Country Selector Button (Vertical Type Selection) */}
+          {/* Country Selector Button (Triggers Bottom Sheet) */}
           <TouchableOpacity
             onPress={() => setIsCountryModalVisible(true)}
             className={`px-3 py-1.5 rounded-full border flex-row items-center gap-1 ${
@@ -825,47 +825,64 @@ const Extensions = ({navigation}: Props) => {
         }
       />
 
-      {/* --- Country Selection Modal (Vertical List) --- */}
+      {/* --- Country Selection Bottom Sheet Modal --- */}
       <Modal
         visible={isCountryModalVisible}
         transparent={true}
-        animationType="fade"
+        animationType="slide"
         onRequestClose={() => setIsCountryModalVisible(false)}>
         <TouchableOpacity
           activeOpacity={1}
           onPress={() => setIsCountryModalVisible(false)}
-          className="flex-1 bg-black/60 justify-center items-center p-4">
+          className="flex-1 bg-black/60 justify-end">
           <TouchableWithoutFeedback>
-            <View className="bg-gray-900 w-3/4 max-h-[60%] rounded-2xl border border-gray-700 overflow-hidden">
-              <View className="p-4 border-b border-gray-800 flex-row justify-between items-center">
-                <Text className="text-white font-bold text-lg">
+            <View className="bg-gray-900 w-full rounded-t-3xl border-t border-gray-700 max-h-[70%]">
+              {/* Drag Handle */}
+              <View className="w-full items-center pt-3 pb-2">
+                <View className="w-12 h-1.5 bg-gray-600 rounded-full" />
+              </View>
+
+              {/* Header */}
+              <View className="px-5 pb-3 border-b border-gray-800 flex-row justify-between items-center">
+                <Text className="text-white font-bold text-xl">
                   Select Country
                 </Text>
                 <TouchableOpacity
-                  onPress={() => setIsCountryModalVisible(false)}>
-                  <Ionicons name="close" size={24} color="gray" />
+                  onPress={() => setIsCountryModalVisible(false)}
+                  className="p-1 bg-gray-800 rounded-full">
+                  <Ionicons name="close" size={20} color="gray" />
                 </TouchableOpacity>
               </View>
-              <ScrollView contentContainerStyle={{padding: 8}}>
+
+              {/* List */}
+              <ScrollView
+                contentContainerStyle={{padding: 16, paddingBottom: 40}}>
                 {uniqueCountries.map(country => (
                   <TouchableOpacity
                     key={country}
                     onPress={() => handleCountrySelect(country)}
-                    className={`p-4 rounded-xl mb-1 flex-row justify-between items-center ${
+                    className={`p-4 rounded-xl mb-2 flex-row justify-between items-center border ${
                       selectedCountry === country
-                        ? 'bg-primary/20'
-                        : 'bg-transparent'
+                        ? 'bg-primary/20 border-primary'
+                        : 'bg-gray-800/50 border-gray-800'
                     }`}>
-                    <Text
-                      className={`${
-                        selectedCountry === country
-                          ? 'text-primary font-bold'
-                          : 'text-gray-300'
-                      }`}>
-                      {country}
-                    </Text>
+                    <View className="flex-row items-center gap-3">
+                      <RenderProviderFlagIcon type={country} />
+                      <Text
+                        className={`${
+                          selectedCountry === country
+                            ? 'text-primary font-bold text-lg'
+                            : 'text-gray-300 text-lg'
+                        }`}>
+                        {country}
+                      </Text>
+                    </View>
                     {selectedCountry === country && (
-                      <Ionicons name="checkmark" size={20} color={primary} />
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={24}
+                        color={primary}
+                      />
                     )}
                   </TouchableOpacity>
                 ))}
