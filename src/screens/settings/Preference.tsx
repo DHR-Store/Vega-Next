@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ToastAndroid,
   StatusBar,
+  TextInput,
 } from 'react-native';
 import React, {useState} from 'react';
 import {MMKV} from '../../lib/Mmkv';
@@ -14,67 +15,95 @@ import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useThemeStore from '../../lib/zustand/themeStore';
 import {Dropdown} from 'react-native-element-dropdown';
 import {themes} from '../../lib/constants';
-import {TextInput} from 'react-native';
+
+// --- Constants for New Features ---
+const dnsProviders = [
+  {name: 'Default (ISP/System)', value: ''},
+  {name: 'Cloudflare (1.1.1.1)', value: 'https://cloudflare-dns.com/dns-query'},
+  {name: 'Google (8.8.8.8)', value: 'https://dns.google/dns-query'},
+  {name: 'AdGuard (AdBlock)', value: 'https://dns.adguard-dns.com/dns-query'},
+  {name: 'Quad9 (Security)', value: 'https://dns.quad9.net/dns-query'},
+  {name: 'Custom', value: 'custom'},
+];
+
+const userAgents = [
+  {name: 'Default (Android)', value: ''},
+  {
+    name: 'Chrome (Windows)',
+    value:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  },
+  {
+    name: 'Firefox (Windows)',
+    value:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
+  },
+  {
+    name: 'Safari (macOS)',
+    value:
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+  },
+  {
+    name: 'iPhone (iOS)',
+    value:
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1',
+  },
+  {name: 'Custom', value: 'custom'},
+];
 
 const Preferences = () => {
   const {primary, setPrimary, isCustom, setCustom} = useThemeStore(
     state => state,
   );
+
+  // Existing States
   const [showRecentlyWatched, setShowRecentlyWatched] = useState(
     MMKV.getBool('showRecentlyWatched') || false,
   );
   const [disableDrawer, setDisableDrawer] = useState(
     MMKV.getBool('disableDrawer') || false,
   );
-
   const [ExcludedQualities, setExcludedQualities] = useState(
     MMKV.getArray('ExcludedQualities') || [],
   );
-
   const [customColor, setCustomColor] = useState(
     MMKV.getString('customColor') || '#FF6347',
   );
-
   const [showMediaControls, setShowMediaControls] = useState<boolean>(
     MMKV.getBool('showMediaControls') === false ? false : true,
   );
-
   const [showHamburgerMenu, setShowHamburgerMenu] = useState<boolean>(
     MMKV.getBool('showHamburgerMenu') === false ? false : true,
   );
-
   const [hideSeekButtons, setHideSeekButtons] = useState<boolean>(
     MMKV.getBool('hideSeekButtons') || false,
   );
-  const [enable2xGesture, setEnable2xGesture] = useState<boolean>(
-    MMKV.getBool('enable2xGesture') || false,
-  );
-
   const [enableSwipeGesture, setEnableSwipeGesture] = useState<boolean>(
     MMKV.getBool('enableSwipeGesture') === false ? false : true,
   );
-
   const [showTabBarLables, setShowTabBarLables] = useState<boolean>(
     MMKV.getBool('showTabBarLables') || false,
   );
-
   const [OpenExternalPlayer, setOpenExternalPlayer] = useState(
-    MMKV.getBool('useExternalPlayer', () => false),
+    MMKV.getBool('useExternalPlayer') || false,
   );
-
   const [hapticFeedback, setHapticFeedback] = useState(
     MMKV.getBool('hapticFeedback') === false ? false : true,
   );
-
   const [alwaysUseExternalDownload, setAlwaysUseExternalDownload] = useState(
     MMKV.getBool('alwaysExternalDownloader') || false,
   );
+
+  // New States for DNS and User Agent
+  const [dnsUrl, setDnsUrl] = useState(MMKV.getString('dnsUrl') || '');
+  const [userAgent, setUserAgent] = useState(MMKV.getString('userAgent') || '');
 
   return (
     <ScrollView
       className="w-full h-full bg-black"
       contentContainerStyle={{
         paddingTop: StatusBar.currentHeight || 0,
+        paddingBottom: 50,
       }}>
       <View className="p-5">
         <Text className="text-2xl font-bold text-white mb-6">Preferences</Text>
@@ -255,6 +284,165 @@ const Preferences = () => {
                   setAlwaysUseExternalDownload(!alwaysUseExternalDownload);
                 }}
               />
+            </View>
+          </View>
+        </View>
+
+        {/* --- Custom Cloud Features (New Section) --- */}
+        <View className="mb-6">
+          <Text className="text-gray-400 text-sm mb-3">
+            Custom Cloud Features
+          </Text>
+          <View className="bg-[#1A1A1A] rounded-xl overflow-hidden p-4">
+            {/* Custom DNS (DoH) */}
+            <View className="mb-4">
+              <Text className="text-white text-base mb-2">
+                Custom DNS (DoH)
+              </Text>
+              <Dropdown
+                selectedTextStyle={{
+                  color: 'white',
+                  fontSize: 14,
+                  fontWeight: '500',
+                }}
+                containerStyle={{
+                  backgroundColor: '#262626',
+                  borderRadius: 8,
+                  borderWidth: 0,
+                }}
+                itemTextStyle={{color: 'white'}}
+                activeColor="#3A3A3A"
+                itemContainerStyle={{
+                  backgroundColor: '#262626',
+                  borderWidth: 0,
+                }}
+                style={{
+                  backgroundColor: '#262626',
+                  borderRadius: 8,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                }}
+                placeholderStyle={{color: 'gray'}}
+                iconStyle={{tintColor: 'white'}}
+                data={dnsProviders}
+                labelField="name"
+                valueField="value"
+                value={
+                  dnsProviders.some(p => p.value === dnsUrl) ? dnsUrl : 'custom'
+                }
+                onChange={item => {
+                  if (item.value !== 'custom') {
+                    MMKV.setString('dnsUrl', item.value);
+                    setDnsUrl(item.value);
+                    ToastAndroid.show(`DNS: ${item.name}`, ToastAndroid.SHORT);
+                  } else {
+                    // Logic handled by rendering input below
+                  }
+                }}
+              />
+
+              {/* Custom DNS Input */}
+              {(dnsUrl === 'custom' ||
+                (!dnsProviders.some(d => d.value === dnsUrl) &&
+                  dnsUrl !== '')) && (
+                <View className="mt-3">
+                  <TextInput
+                    style={{
+                      color: 'white',
+                      backgroundColor: '#262626',
+                      borderRadius: 8,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      fontSize: 14,
+                    }}
+                    placeholder="https://..."
+                    placeholderTextColor="gray"
+                    defaultValue={dnsUrl}
+                    onSubmitEditing={e => {
+                      MMKV.setString('dnsUrl', e.nativeEvent.text);
+                      setDnsUrl(e.nativeEvent.text);
+                      ToastAndroid.show('Custom DNS Saved', ToastAndroid.SHORT);
+                    }}
+                  />
+                  <Text className="text-gray-500 text-xs mt-2 ml-1">
+                    Enter a valid DNS-over-HTTPS URL.
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* User Agent */}
+            <View>
+              <Text className="text-white text-base mb-2">User Agent</Text>
+              <Dropdown
+                selectedTextStyle={{
+                  color: 'white',
+                  fontSize: 14,
+                  fontWeight: '500',
+                }}
+                containerStyle={{
+                  backgroundColor: '#262626',
+                  borderRadius: 8,
+                  borderWidth: 0,
+                }}
+                itemTextStyle={{color: 'white'}}
+                activeColor="#3A3A3A"
+                itemContainerStyle={{
+                  backgroundColor: '#262626',
+                  borderWidth: 0,
+                }}
+                style={{
+                  backgroundColor: '#262626',
+                  borderRadius: 8,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                }}
+                placeholderStyle={{color: 'gray'}}
+                iconStyle={{tintColor: 'white'}}
+                data={userAgents}
+                labelField="name"
+                valueField="value"
+                value={
+                  userAgents.some(ua => ua.value === userAgent)
+                    ? userAgent
+                    : 'custom'
+                }
+                onChange={item => {
+                  if (item.value !== 'custom') {
+                    MMKV.setString('userAgent', item.value);
+                    setUserAgent(item.value);
+                    ToastAndroid.show(
+                      `Applied: ${item.name}`,
+                      ToastAndroid.SHORT,
+                    );
+                  }
+                }}
+              />
+
+              {/* Custom User Agent Input */}
+              {(userAgent === 'custom' ||
+                (!userAgents.some(ua => ua.value === userAgent) &&
+                  userAgent !== '')) && (
+                <TextInput
+                  style={{
+                    color: 'white',
+                    backgroundColor: '#262626',
+                    borderRadius: 8,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    fontSize: 14,
+                    marginTop: 12,
+                  }}
+                  placeholder="Enter custom User-Agent..."
+                  placeholderTextColor="gray"
+                  defaultValue={userAgent}
+                  onSubmitEditing={e => {
+                    MMKV.setString('userAgent', e.nativeEvent.text);
+                    setUserAgent(e.nativeEvent.text);
+                    ToastAndroid.show('Custom UA Saved', ToastAndroid.SHORT);
+                  }}
+                />
+              )}
             </View>
           </View>
         </View>
