@@ -1,5 +1,4 @@
-// App.tsx (full, ready-to-paste)
-// OneSignal integrated, hook-safe, preserves original screens and flows.
+// App.tsx (Fixed: Uses 'additive' SafeArea logic for perfect Android Nav positioning)
 
 import 'react-native-reanimated';
 import React, {useEffect, useState} from 'react';
@@ -13,10 +12,7 @@ import {
   Linking,
   Dimensions,
   LogBox,
-  ViewStyle,
-  SafeAreaView,
   Platform,
-  StyleProp,
 } from 'react-native';
 import {MaterialIcons} from '@expo/vector-icons';
 
@@ -35,7 +31,6 @@ import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Entypo from '@expo/vector-icons/Entypo';
-import MaterialCommunityIcons from '@expo/icons/MaterialCommunityIcons';
 import 'react-native-gesture-handler';
 import WebView from './screens/WebView';
 import SearchResults from './screens/SearchResults';
@@ -48,7 +43,7 @@ import useThemeStore from './lib/zustand/themeStore';
 import {EpisodeLink} from './lib/providers/types';
 import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import TabBarBackgound from './components/TabBarBackgound';
-import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 import Animated from 'react-native-reanimated';
 import Downloads from './screens/settings/Downloads';
 import SeriesEpisodes from './screens/settings/SeriesEpisodes';
@@ -209,9 +204,7 @@ const VegaMusicStack = createNativeStackNavigator<VegaMusicStackParamList>();
 const TVRootStack = createNativeStackNavigator<TVRootStackParamList>();
 const VegaTVStack = createNativeStackNavigator<VegaTVStackParamList>();
 
-/* ----------------- Custom TabBarButton FIX (Function Declaration) ----------------- */
-// FIX: Using a standard function declaration guarantees full hoisting,
-// resolving potential ReferenceErrors caused by const/let binding in some bundler environments.
+/* ----------------- Custom TabBarButton ----------------- */
 function CustomTabBarButton(props) {
   return (
     <TouchableOpacity
@@ -375,10 +368,6 @@ function TabStackScreen() {
   const {primary} = useThemeStore(state => state);
   const showTabBarLables = settingsStorage.showTabBarLabels();
 
-  // FIX: Increased height from 80 to 90 and adjusted paddingTop for better label visibility
-  const tabBarHeight = isLargeScreen ? undefined : 90; // Increased height
-  const tabBarPaddingTop = isLargeScreen ? undefined : 10; // Adjusted padding
-
   return (
     <Tab.Navigator
       detachInactiveScreens={true}
@@ -395,24 +384,27 @@ function TabStackScreen() {
         tabBarShowLabel: showTabBarLables,
         tabBarStyle: !isLargeScreen
           ? {
-              // Re-adding absolute positioning properties
-              position: 'absolute', // <--- Re-add
-              bottom: 0, // <--- Re-add
-              left: 0, // <--- Ensure coverage
-              right: 0, // <--- Ensure coverage
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
 
-              height: 72, // Use adjusted height
+              // FIX: Constant Height + No manual inset math
+              // The Root SafeAreaView handles the spacing now (additive)
+              height: 45, // Slightly taller for icons + text
+
+              backgroundColor: 'transparent',
               borderRadius: 0,
-              overflow: 'hidden',
+              overflow: 'visible',
               elevation: 0,
               borderTopWidth: 0,
               paddingHorizontal: 0,
-              paddingTop: 5, // Use adjusted padding
+              paddingTop: 5,
             }
           : {},
         tabBarBackground: () => <TabBarBackgound />,
         tabBarHideOnKeyboard: true,
-        tabBarButton: CustomTabBarButton, // References the fully hoisted function
+        tabBarButton: CustomTabBarButton,
       }}>
       <Tab.Screen
         name="HomeStack"
@@ -771,6 +763,8 @@ const App = () => {
     <GlobalErrorBoundary>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
+          {/* FIX: Using 'additive' automatically pads the bottom to avoid the nav bar,
+              allowing the absolute TabBar to sit perfectly above it. */}
           <SafeAreaView
             edges={{
               right: 'off',
@@ -819,7 +813,6 @@ const App = () => {
                   freezeOnBlur: true,
                   contentStyle: {backgroundColor: 'transparent'},
                 }}>
-                {/* Use component prop instead of children to keep hooks order stable */}
                 <Stack.Screen name="MainStack" component={MainComponent} />
                 <Stack.Screen
                   name="Player"
