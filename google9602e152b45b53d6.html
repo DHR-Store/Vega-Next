@@ -1,1 +1,95 @@
-google-site-verification: google9602e152b45b53d6.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>YouTube Downloader (No API Key)</title>
+<style>
+body { font-family: Arial, sans-serif; background: #f2f2f2; padding: 40px; }
+input, button { padding: 10px; font-size: 16px; }
+button { cursor: pointer; }
+#result { margin-top: 20px; }
+.link { display: block; margin: 5px 0; color: #0066cc; text-decoration: none; }
+.link:hover { text-decoration: underline; }
+img { max-width: 300px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h2>YouTube Downloader (No API Key)</h2>
+
+<label for="videoInput">YouTube URL or Video ID:</label>
+<input type="text" id="videoInput" placeholder="e.g., t86sKsR4pnk or https://www.youtube.com/watch?v=t86sKsR4pnk" />
+<button id="fetchBtn">Get Download Links</button>
+
+<div id="result"></div>
+
+<script>
+// Function to extract video ID from any YouTube URL
+function getVideoId(input) {
+    try {
+        if(input.includes("youtube.com") || input.includes("youtu.be")) {
+            const url = new URL(input);
+            if(url.pathname.startsWith("/embed/")) return url.pathname.split("/embed/")[1];
+            if(url.pathname.startsWith("/shorts/")) return url.pathname.split("/shorts/")[1];
+            return url.searchParams.get("v");
+        } else {
+            return input;
+        }
+    } catch(e) {
+        return input; 
+    }
+}
+
+// Function to parse player response from YouTube HTML
+function parsePlayerResponse(html) {
+    const match = html.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\});/);
+    if(!match) return null;
+    return JSON.parse(match[1]);
+}
+
+document.getElementById('fetchBtn').addEventListener('click', async () => {
+    const input = document.getElementById('videoInput').value.trim();
+    if (!input) return alert("Please enter a YouTube video ID or URL");
+
+    const videoId = getVideoId(input);
+    const resultDiv = document.getElementById('result');
+    resultDiv.innerHTML = "Fetching download links...";
+
+    try {
+        const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
+        const html = await response.text();
+        const playerResponse = parsePlayerResponse(html);
+
+        if(!playerResponse || !playerResponse.streamingData) {
+            resultDiv.innerHTML = "No download links found! Video may be restricted.";
+            return;
+        }
+
+        const { formats = [], adaptiveFormats = [] } = playerResponse.streamingData;
+        const title = playerResponse.videoDetails.title;
+        const thumbnail = playerResponse.videoDetails.thumbnail?.thumbnails?.slice(-1)[0]?.url;
+
+        let htmlOutput = `<h3>${title}</h3>`;
+        if(thumbnail) htmlOutput += `<img src="${thumbnail}" alt="thumbnail"><br>`;
+
+        htmlOutput += "<strong>Video/Audio Formats:</strong><br>";
+
+        [...formats, ...adaptiveFormats].forEach(f => {
+            if(f.url) {
+                const type = f.mimeType.split(";")[0];
+                const label = f.qualityLabel || f.audioQuality || 'N/A';
+                htmlOutput += `<a class="link" href="${f.url}" target="_blank">${label} - ${type}</a>`;
+            }
+        });
+
+        resultDiv.innerHTML = htmlOutput;
+
+    } catch(err) {
+        console.error(err);
+        resultDiv.innerHTML = "Error fetching download links. Video may be blocked or restricted.";
+    }
+});
+</script>
+
+</body>
+</html>

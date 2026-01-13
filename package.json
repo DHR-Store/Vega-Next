@@ -1,6 +1,6 @@
 {
   "name": "vega-next",
-  "version": "3.4.3",
+  "version": "3.4.4",
   "private": true,
   "scripts": {
     "android": "expo run:android",
@@ -82,7 +82,8 @@
     "react-native-toast-message": "^2.3.3",
     "react-native-video": "^6.11.0",
     "react-native-volume-manager": "^2.0.8",
-    "react-native-webview": "^13.12.5",
+    "react-native-webview": "^13.16.0",
+    "react-native-youtube-iframe": "^2.4.1",
     "socket.io-client": "^4.8.1",
     "zustand": "^4.5.2"
   },

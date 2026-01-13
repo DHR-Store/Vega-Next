@@ -8,7 +8,7 @@ import {
   View,
   Linking,
 } from 'react-native';
-import React, {useEffect, useRef} from 'react';
+import React, {useEffect, useRef, useMemo} from 'react';
 import {Stream} from '../lib/providers/types';
 import BottomSheet, {BottomSheetScrollView} from '@gorhom/bottom-sheet';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
@@ -28,6 +28,7 @@ type Props = {
   onPressVideo: (item: any) => void;
   onPressSubs: (item: any) => void;
 };
+
 const DownloadBottomSheet = ({
   data,
   loading,
@@ -41,13 +42,24 @@ const DownloadBottomSheet = ({
   const {primary} = useThemeStore(state => state);
   const [activeTab, setActiveTab] = React.useState<1 | 2>(1);
 
-  const subtitle = data?.map(server => server.subtitles).filter(Boolean);
+  // FIXED: Flatten subtitles into a single array using useMemo.
+  // This removes the need for nested maps and makes length checks accurate.
+  const parsedSubtitles = useMemo(() => {
+    if (!data) return [];
+    return data.reduce((acc: any[], server) => {
+      if (server.subtitles && server.subtitles.length > 0) {
+        return [...acc, ...server.subtitles];
+      }
+      return acc;
+    }, []);
+  }, [data]);
 
   useEffect(() => {
     if (showModal) bottomSheetRef.current?.expand();
     else bottomSheetRef.current?.close();
   }, [showModal]);
 
+  // PRESERVED: External Download/Play Logic for Video
   const handlePressVideo = async (item: Stream) => {
     const useExternal = settingsStorage.getBool(
       'alwaysExternalDownloader',
@@ -65,6 +77,7 @@ const DownloadBottomSheet = ({
     bottomSheetRef.current?.close();
   };
 
+  // PRESERVED: External Download/Play Logic for Subtitles
   const handlePressSubs = async (item: {
     link: string;
     type: string;
@@ -110,7 +123,8 @@ const DownloadBottomSheet = ({
               <BottomSheetScrollView
                 style={{padding: 5, marginBottom: 5}}
                 showsVerticalScrollIndicator={false}>
-                {subtitle.length > 0 && subtitle[0] !== undefined && (
+                {/* FIXED: Use parsedSubtitles.length for checking existence */}
+                {parsedSubtitles.length > 0 && (
                   <View className="flex-row items-center justify-center gap-x-3 w-full my-5">
                     <Text
                       className={'text-lg p-1 font-semibold text-center'}
@@ -164,46 +178,36 @@ const DownloadBottomSheet = ({
                         <Text style={{color: 'white'}}>{item.server}</Text>
                       </TouchableOpacity>
                     ))
-                  : subtitle.length > 0
-                  ? subtitle.map(
-                      subs =>
-                        subs?.map(item => (
-                          <TouchableOpacity
-                            className="p-2 bg-white/30 rounded-md my-1"
-                            key={item.uri}
-                            onLongPress={() => {
-                              if (settingsStorage.isHapticFeedbackEnabled()) {
-                                RNReactNativeHapticFeedback.trigger(
-                                  'effectTick',
-                                  {
-                                    enableVibrateFallback: true,
-                                    ignoreAndroidSystemSettings: false,
-                                  },
-                                );
-                              }
-                              Clipboard.setString(item.uri);
-                              ToastAndroid.show(
-                                'Link copied',
-                                ToastAndroid.SHORT,
-                              );
-                            }}
-                            onPress={() =>
-                              handlePressSubs({
-                                server: 'Subtitles',
-                                link: item.uri,
-                                type:
-                                  item.type === TextTrackType.VTT
-                                    ? 'vtt'
-                                    : 'srt',
-                                title: item.title,
-                              })
-                            }>
-                            <Text style={{color: 'white'}}>
-                              {item.language} - {item.title}
-                            </Text>
-                          </TouchableOpacity>
-                        )),
-                    )
+                  : /* FIXED: Map directly over the flattened parsedSubtitles array */
+                  parsedSubtitles.length > 0
+                  ? parsedSubtitles.map((item, index) => (
+                      <TouchableOpacity
+                        className="p-2 bg-white/30 rounded-md my-1"
+                        key={item.uri + index}
+                        onLongPress={() => {
+                          if (settingsStorage.isHapticFeedbackEnabled()) {
+                            RNReactNativeHapticFeedback.trigger('effectTick', {
+                              enableVibrateFallback: true,
+                              ignoreAndroidSystemSettings: false,
+                            });
+                          }
+                          Clipboard.setString(item.uri);
+                          ToastAndroid.show('Link copied', ToastAndroid.SHORT);
+                        }}
+                        onPress={() =>
+                          handlePressSubs({
+                            server: 'Subtitles',
+                            link: item.uri,
+                            type:
+                              item.type === TextTrackType.VTT ? 'vtt' : 'srt',
+                            title: item.title,
+                          })
+                        }>
+                        <Text style={{color: 'white'}}>
+                          {item.language} - {item.title}
+                        </Text>
+                      </TouchableOpacity>
+                    ))
                   : null}
                 {data.length === 0 && !loading && (
                   <Text className="text-red-500 text-lg text-center">

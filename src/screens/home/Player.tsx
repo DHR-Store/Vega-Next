@@ -70,10 +70,10 @@ interface FirebaseConfig {
 const FALLBACK_FIREBASE_CONFIG: FirebaseConfig = {
   apiKey: 'Your_API_Key_Here',
   authDomain: 'Your_Auth_Domain_Here',
-  databaseURL: 'https://together-5dde5-default-rtdb.firebaseio.com',
-  projectId: 'your-project-id',
-  storageBucket: 'together-5dde5.appspot.com',
-  messagingSenderId: 'your-messaging-sender-id',
+  databaseURL: 'Your_Database_URL_Here',
+  projectId: 'Your_Project_ID_Here',
+  storageBucket: 'Your_Storage_Bucket_Here',
+  messagingSenderId: 'Your_Messaging_Sender_ID_Here',
   appId: 'Your_App_ID_Here',
   measurementId: 'Your_Measurement_ID_Here',
 };

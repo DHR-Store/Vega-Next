@@ -1,4 +1,4 @@
-// App.tsx (Fixed: Uses 'additive' SafeArea logic for perfect Android Nav positioning)
+// App.tsx
 
 import 'react-native-reanimated';
 import React, {useEffect, useState} from 'react';
@@ -13,6 +13,7 @@ import {
   Dimensions,
   LogBox,
   Platform,
+  DeviceEventEmitter,
 } from 'react-native';
 import {MaterialIcons} from '@expo/vector-icons';
 
@@ -70,6 +71,7 @@ import useAppModeStore from './lib/zustand/appModeStore';
 import VegaTVSettingsScreen from './screens/tv/VegaTVSettingsScreen';
 import * as Application from 'expo-application';
 import Suggestion from './screens/Suggestion';
+import {MMKV} from './lib/Mmkv'; // IMPORT ADDED HERE
 
 enableScreens(true);
 enableFreeze(true);
@@ -366,7 +368,25 @@ function VegaTVStackNavigator() {
 /* ----------------- Tab stack ----------------- */
 function TabStackScreen() {
   const {primary} = useThemeStore(state => state);
-  const showTabBarLables = settingsStorage.showTabBarLabels();
+
+  // Initialize with current value directly from MMKV using the CORRECT KEY
+  // Note: key is 'showTabBarLables' (matching Preference.tsx)
+  const [showTabBarLabels, setShowTabBarLabels] = useState(
+    MMKV.getBool('showTabBarLables') || false,
+  );
+
+  // Listen for changes from Preferences.tsx
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      'changeTabBarLabel',
+      newValue => {
+        setShowTabBarLabels(newValue);
+      },
+    );
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   return (
     <Tab.Navigator
@@ -381,18 +401,16 @@ function TabStackScreen() {
         freezeOnBlur: true,
         tabBarActiveTintColor: primary,
         tabBarInactiveTintColor: '#dadde3',
-        tabBarShowLabel: showTabBarLables,
+        tabBarShowLabel: showTabBarLabels, // Reactive state
         tabBarStyle: !isLargeScreen
           ? {
               position: 'absolute',
               bottom: 0,
               left: 0,
               right: 0,
-
               // FIX: Constant Height + No manual inset math
-              // The Root SafeAreaView handles the spacing now (additive)
-              height: 45, // Slightly taller for icons + text
-
+              // INCREASED HEIGHT HERE: 70 if labels are on, 45 if off
+              height: showTabBarLabels ? 70 : 45,
               backgroundColor: 'transparent',
               borderRadius: 0,
               overflow: 'visible',
@@ -400,6 +418,8 @@ function TabStackScreen() {
               borderTopWidth: 0,
               paddingHorizontal: 0,
               paddingTop: 5,
+              // Added padding bottom to give text space
+              paddingBottom: showTabBarLabels ? 5 : 0,
             }
           : {},
         tabBarBackground: () => <TabBarBackgound />,

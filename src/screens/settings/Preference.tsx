@@ -7,6 +7,7 @@ import {
   ToastAndroid,
   StatusBar,
   TextInput,
+  DeviceEventEmitter, // Added Import
 } from 'react-native';
 import React, {useState} from 'react';
 import {MMKV} from '../../lib/Mmkv';
@@ -217,8 +218,14 @@ const Preferences = () => {
                 thumbColor={showTabBarLables ? primary : 'gray'}
                 value={showTabBarLables}
                 onValueChange={() => {
-                  MMKV.setBool('showTabBarLables', !showTabBarLables);
-                  setShowTabBarLables(!showTabBarLables);
+                  const newVal = !showTabBarLables;
+                  MMKV.setBool('showTabBarLables', newVal);
+                  setShowTabBarLables(newVal);
+
+                  // Emit event for instant update
+                  DeviceEventEmitter.emit('changeTabBarLabel', newVal);
+
+                  // Show toast as requested
                   ToastAndroid.show(
                     'Restart App to Apply Changes',
                     ToastAndroid.SHORT,
