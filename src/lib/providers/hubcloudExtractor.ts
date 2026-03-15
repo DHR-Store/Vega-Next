@@ -37,10 +37,34 @@ export async function hubcloudExtracter(link: string, signal: AbortSignal) {
     const $ = cheerio.load(await vcloudRes.text());
     // console.log('vcloudRes', $.text());
 
-    const linkClass = $('.btn-success.btn-lg.h6,.btn-danger,.btn-secondary');
+    // ADDED: Appended "a.btn" to catch all download buttons properly
+    const linkClass = $('.btn-success.btn-lg.h6,.btn-danger,.btn-secondary, a.btn');
+    
+    // ADDED: Prevent processing the same link twice due to the broadened selector
+    const processedLinks = new Set<string>();
+
     for (const element of linkClass) {
       const itm = $(element);
       let link = itm.attr('href') || '';
+
+      // ADDED: Filter out Telegram links, empty links, VPN ads, or duplicates
+      if (!link || processedLinks.has(link) || link.toLowerCase().includes('telegram') || link.includes('t.me') || link.includes('one.one.one.one') || link.includes('tinyurl.com')) {
+          continue;
+      }
+      processedLinks.add(link);
+
+      // ADDED: Decode base64 links passed through re.php
+      if (link.includes('re.php?l=')) {
+          try {
+              const b64 = link.split('re.php?l=')[1].split('&')[0];
+              link = decode(b64);
+          } catch(e) {}
+      }
+
+      // ADDED: Extract server name directly from the button's text for fallback
+      const btnText = itm.text().trim();
+      const serverNameMatch = btnText.match(/\[(.*?)\]/);
+      const fallbackServerName = serverNameMatch ? serverNameMatch[1] : (btnText.replace('Download', '').trim() || 'Download Server');
 
       switch (true) {
         case link?.includes('.dev') && !link?.includes('/?id='):
@@ -133,6 +157,9 @@ export async function hubcloudExtracter(link: string, signal: AbortSignal) {
                 .match(/^(?:https?:\/\/)?(?:www\.)?([^\/]+)/i)?.[1]
                 ?.replace(/\./g, ' ') || 'Unknown';
             streamLinks.push({server: serverName, link: link, type: 'mkv'});
+          } else if (link.startsWith('http')) {
+            // ADDED: Catch-all for valid CDN links (like piececdn) that don't explicitly have '.mkv'
+            streamLinks.push({server: fallbackServerName, link: link, type: 'mkv'});
           }
           break;
       }

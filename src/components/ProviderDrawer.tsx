@@ -1,10 +1,8 @@
-import {View, Text, Image, TouchableOpacity} from 'react-native';
+import {View, Text, Image, TouchableOpacity, ScrollView} from 'react-native';
 import React from 'react';
 import useContentStore from '../lib/zustand/contentStore';
-import {ScrollView} from 'moti';
 import useThemeStore from '../lib/zustand/themeStore';
 import {DrawerLayout} from 'react-native-gesture-handler';
-import {BlurView} from 'expo-blur';
 import {MaterialIcons} from '@expo/vector-icons';
 // Make sure this path is correct relative to where ProviderDrawer is located
 import RenderProviderFlagIcon from '../components/RenderProviderFLagIcon';
@@ -20,12 +18,8 @@ const ProviderDrawer = ({
   const {primary} = useThemeStore(state => state);
 
   return (
-    <BlurView
-      intensity={90}
-      experimentalBlurMethod="dimezisBlurView"
-      blurReductionFactor={5}
-      tint="dark"
-      className="flex-1">
+    // Replaced BlurView with a solid/semi-transparent View for maximum Android performance
+    <View className="flex-1 bg-[#0f0f0f] w-full h-full">
       {/* Header */}
       <View className="mt-10 px-4 pb-2 border-b border-white/10">
         <Text className="text-white text-lg font-semibold tracking-wide">
@@ -36,9 +30,13 @@ const ProviderDrawer = ({
         </Text>
       </View>
 
+      {/* Standard ScrollView instead of Moti for smooth scrolling */}
       <ScrollView
         showsVerticalScrollIndicator={false}
-        className="flex-1 px-3 mt-2">
+        className="flex-1 px-3 mt-2"
+        removeClippedSubviews={true} // Optimization for long lists
+        overScrollMode="never" // Prevents overscroll animation glitch on Android
+      >
         {installedProviders.map(item => {
           const isActive = provider.value === item.value;
 
@@ -56,7 +54,7 @@ const ProviderDrawer = ({
                   : 'bg-transparent border-transparent'
               }`}>
               <View className="flex-row items-center flex-1 gap-3">
-                {/* --- Dynamic Icon Logic from Extensions.tsx --- */}
+                {/* --- Dynamic Icon Logic --- */}
                 {item.icon ? (
                   <Image
                     source={{uri: item.icon}}
@@ -103,7 +101,7 @@ const ProviderDrawer = ({
         })}
         <View className="h-20" />
       </ScrollView>
-    </BlurView>
+    </View>
   );
 };
 

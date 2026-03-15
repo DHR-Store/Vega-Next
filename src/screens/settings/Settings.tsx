@@ -33,11 +33,9 @@ import {
   AntDesign,
   Feather,
   MaterialIcons,
-  Ionicons,
 } from '@expo/vector-icons';
 import useThemeStore from '../../lib/zustand/themeStore';
 import useWatchHistoryStore from '../../lib/zustand/watchHistrory';
-import Animated, {FadeInDown, FadeInUp, Layout} from 'react-native-reanimated';
 import {useNavigation} from '@react-navigation/native';
 import {check, request, PERMISSIONS, RESULTS} from 'react-native-permissions';
 
@@ -199,6 +197,11 @@ const ExternalLinkRow = React.memo(
   ),
 );
 
+// Simple Wrapper to replace AnimatedSection
+const Section = ({children}: {children: React.ReactNode}) => (
+  <View>{children}</View>
+);
+
 const Settings = ({navigation}: Props) => {
   const tabNavigation =
     useNavigation<NativeStackNavigationProp<TabStackParamList>>();
@@ -330,7 +333,6 @@ const Settings = ({navigation}: Props) => {
   }, [networkProxyMode]);
   // --------------------
 
-  // --- UPDATED PARSING LOGIC TO PREVENT CRASH ---
   const parseSyncLink = (link: string) => {
     // Helper to extract value by key from a complex URL string
     const getParam = (key: string) => {
@@ -380,7 +382,6 @@ const Settings = ({navigation}: Props) => {
       // Robust Mock Params for Player
       const mockPlayerParams = {
         id: parsedData.videoId,
-        // CRITICAL: Pass title from link or fallback
         primaryTitle: parsedData.primaryTitle,
         title: parsedData.primaryTitle,
         link: parsedData.videoId,
@@ -389,25 +390,18 @@ const Settings = ({navigation}: Props) => {
         episodeList: [
           {link: parsedData.videoId, title: parsedData.primaryTitle},
         ],
-
-        // CRITICAL: Pass the provider value from the link so Player uses the correct extractor
         providerValue: parsedData.providerValue || provider.value,
         infoUrl: parsedData.infoUrl,
-
-        // Pass the fallback provider object to satisfy TS, but providerValue above takes precedence in Player
         provider: {
           value: parsedData.providerValue || provider.value,
           type: provider.type,
           display_name: provider.display_name,
           icon: provider.icon,
         } as ProviderExtension,
-
         type: 'Movie',
-
-        // Watch Together Specifics
         initialSeekTime: parsedData.time,
-        syncLink: true, // Boolean true to trigger join logic
-        roomId: parsedData.roomId, // CRITICAL: Must pass this!
+        syncLink: true,
+        roomId: parsedData.roomId,
         leader: parsedData.leader,
         time: parsedData.time,
       };
@@ -446,39 +440,23 @@ const Settings = ({navigation}: Props) => {
     }
   }, []);
 
-  const AnimatedSection = ({
-    delay,
-    children,
-  }: {
-    delay: number;
-    children: React.ReactNode;
-  }) => (
-    <Animated.View
-      entering={FadeInDown.delay(delay).springify()}
-      layout={Layout.springify()}>
-      {children}
-    </Animated.View>
-  );
-
   return (
-    <Animated.ScrollView
+    <ScrollView
       className="w-full h-full bg-black"
       showsVerticalScrollIndicator={false}
-      bounces={true}
-      overScrollMode="always"
-      entering={FadeInUp.springify()}
-      layout={Layout.springify()}
+      overScrollMode="never" // Better visual experience on Android
+      removeClippedSubviews={true} // Performance optimization
       contentContainerStyle={{
         paddingTop: 15,
         paddingBottom: 24,
         flexGrow: 1,
       }}>
       <View className="p-5">
-        <Animated.View entering={FadeInUp.springify()}>
+        <View>
           <Text className="text-2xl font-bold text-white mb-6">Settings</Text>
-        </Animated.View>
+        </View>
 
-        <AnimatedSection delay={50}>
+        <Section>
           <View className="mb-6 flex-col gap-3">
             <Text className="text-gray-400 text-sm mb-1">App Mode</Text>
             <View className="bg-[#1A1A1A] rounded-xl overflow-hidden">
@@ -512,15 +490,15 @@ const Settings = ({navigation}: Props) => {
               </View>
             </View>
           </View>
-        </AnimatedSection>
+        </Section>
 
-        <AnimatedSection delay={100}>
+        <Section>
           <Text className="text-gray-400 text-sm mb-3 ml-5">Notifications</Text>
           <NotificationPrompt />
-        </AnimatedSection>
+        </Section>
 
-        {/* --- NEW NETWORK / PROXY SECTION --- */}
-        <AnimatedSection delay={120}>
+        {/* --- NETWORK / PROXY SECTION --- */}
+        <Section>
           <View className="mb-6 flex-col gap-3">
             <Text className="text-gray-400 text-sm mb-1">
               Network & Connection
@@ -552,11 +530,11 @@ const Settings = ({navigation}: Props) => {
               </View>
             </View>
           </View>
-        </AnimatedSection>
+        </Section>
         {/* ----------------------------------- */}
 
         {appMode === 'video' && (
-          <AnimatedSection delay={150}>
+          <Section>
             <View className="mb-6 flex-col gap-3">
               <Text className="text-gray-400 text-sm mb-1">
                 Content Provider
@@ -586,11 +564,11 @@ const Settings = ({navigation}: Props) => {
                 />
               </View>
             </View>
-          </AnimatedSection>
+          </Section>
         )}
 
         {/* Watch Together Section */}
-        <AnimatedSection delay={200}>
+        <Section>
           <View className="mb-6 flex-col gap-3">
             <Text className="text-gray-400 text-sm mb-1">Watch Together</Text>
             <View className="bg-[#1A1A1A] rounded-xl overflow-hidden">
@@ -646,9 +624,9 @@ const Settings = ({navigation}: Props) => {
               )}
             </View>
           </View>
-        </AnimatedSection>
+        </Section>
 
-        <AnimatedSection delay={250}>
+        <Section>
           <View className="mb-6">
             <Text className="text-gray-400 text-sm mb-3">Options</Text>
             <View className="bg-[#1A1A1A] rounded-xl overflow-hidden">
@@ -679,9 +657,9 @@ const Settings = ({navigation}: Props) => {
               />
             </View>
           </View>
-        </AnimatedSection>
+        </Section>
 
-        <AnimatedSection delay={350}>
+        <Section>
           <View className="mb-6">
             <Text className="text-gray-400 text-sm mb-3">Data Management</Text>
             <View className="bg-[#1A1A1A] rounded-xl overflow-hidden">
@@ -714,9 +692,9 @@ const Settings = ({navigation}: Props) => {
               </View>
             </View>
           </View>
-        </AnimatedSection>
+        </Section>
 
-        <AnimatedSection delay={450}>
+        <Section>
           <View className="mb-6">
             <Text className="text-gray-400 text-sm mb-3">About</Text>
             <View className="bg-[#1A1A1A] rounded-xl overflow-hidden">
@@ -761,9 +739,9 @@ const Settings = ({navigation}: Props) => {
               />
             </View>
           </View>
-        </AnimatedSection>
+        </Section>
       </View>
-    </Animated.ScrollView>
+    </ScrollView>
   );
 };
 

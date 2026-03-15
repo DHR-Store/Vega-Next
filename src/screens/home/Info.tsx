@@ -23,6 +23,7 @@ import {
 import {HomeStackParamList, TabStackParamList} from '../../App';
 import LinearGradient from 'react-native-linear-gradient';
 import SeasonList from '../../components/SeasonList';
+import CastInfo from '../../components/CastInfo'; // ADDED NEW IMPORT
 import {Skeleton} from 'moti/skeleton';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {settingsStorage, watchListStorage} from '../../lib/storage';
@@ -825,28 +826,18 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
               </Text>
             </View>
           )}
-          {castList && castList.length > 0 && (
-            <View className="mb-2 w-full flex-row items-start gap-2">
-              <Text className="text-white text-lg font-semibold pt-[0.9px]">
-                Cast
-              </Text>
-              <View className="flex-row gap-1 flex-wrap">
-                {castList?.slice(0, 3).map((actor: string, index: number) => (
-                  <Text
-                    key={actor}
-                    className={`text-xs bg-tertiary p-1 px-2 rounded-md ${
-                      index % 3 === 0
-                        ? 'text-red-500'
-                        : index % 3 === 1
-                        ? 'text-blue-500'
-                        : 'text-green-500'
-                    }`}>
-                    {actor}
-                  </Text>
-                ))}
-              </View>
-            </View>
+
+          {/* --- ADDED CAST INFO COMPONENT --- */}
+          {displayTitle && (
+            <CastInfo
+              title={displayTitle}
+              type={info?.type}
+              year={meta?.year}
+              imdbId={meta?.imdbId || meta?.imdb_id}
+              fallbackCast={castList}
+            />
           )}
+
           <View className="mb-2 w-full flex-row items-center justify-between">
             <View className="flex-row items-center gap-2">
               <Text className="text-white text-lg font-semibold">Synopsis</Text>

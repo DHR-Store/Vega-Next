@@ -72,6 +72,8 @@ import VegaTVSettingsScreen from './screens/tv/VegaTVSettingsScreen';
 import * as Application from 'expo-application';
 import Suggestion from './screens/Suggestion';
 import {MMKV} from './lib/Mmkv'; // IMPORT ADDED HERE
+import CastMovie from './screens/CastMovie';
+import Onboarding from './screens/Onboarding';
 
 enableScreens(true);
 enableFreeze(true);
@@ -118,6 +120,7 @@ export type TVRootStackParamList = {
 };
 
 export type RootStackParamList = {
+  Onboarding: undefined;
   TabStack: NavigatorScreenParams<TabStackParamList>;
   MusicRootStack: NavigatorScreenParams<MusicRootStackParamList>;
   TVRootStack: NavigatorScreenParams<TVRootStackParamList>;
@@ -138,6 +141,8 @@ export type RootStackParamList = {
     infoUrl?: string;
   };
   WatchTrailer: {link?: string; videoId?: string};
+  // ADDED CASTMOVIE TO ROOT STACK
+  CastMovie: {castId: number; castName: string};
 };
 
 export type SearchStackParamList = {
@@ -157,6 +162,8 @@ export type SearchStackParamList = {
   Info: {link: string; provider?: string; poster?: string};
   SearchResults: {filter: string; availableProviders?: string[]};
   Webview: {link: string};
+  // FIXED: Added Suggestion type which was missing
+  Suggestion: undefined;
 };
 
 export type WatchListStackParamList = {
@@ -262,7 +269,10 @@ function SearchStackScreen() {
       <SearchStack.Screen name="ScrollList" component={ScrollList} />
       <SearchStack.Screen name="GenreList" component={ScrollList} />
       <SearchStack.Screen name="Info" component={Info} />
-      <Stack.Screen name="Suggestion" component={Suggestion} />
+
+      {/* FIXED: Changed from Stack.Screen to SearchStack.Screen */}
+      <SearchStack.Screen name="Suggestion" component={Suggestion} />
+
       <SearchStack.Screen name="SearchResults" component={SearchResults} />
       <SearchStack.Screen name="Webview" component={WebView} />
     </SearchStack.Navigator>
@@ -778,6 +788,8 @@ const App = () => {
     MainComponent = TVRootStackScreen;
   }
 
+  const hasSeenOnboarding = MMKV.getBool('hasSeenOnboarding') === true;
+
   /* ----------------- Render ----------------- */
   return (
     <GlobalErrorBoundary>
@@ -826,6 +838,9 @@ const App = () => {
                 },
               }}>
               <Stack.Navigator
+                initialRouteName={
+                  hasSeenOnboarding ? 'MainStack' : 'Onboarding'
+                }
                 screenOptions={{
                   headerShown: false,
                   animation: 'ios_from_right',
@@ -833,6 +848,7 @@ const App = () => {
                   freezeOnBlur: true,
                   contentStyle: {backgroundColor: 'transparent'},
                 }}>
+                <Stack.Screen name="Onboarding" component={Onboarding} />
                 <Stack.Screen name="MainStack" component={MainComponent} />
                 <Stack.Screen
                   name="Player"
@@ -840,6 +856,9 @@ const App = () => {
                   options={{orientation: 'landscape'}}
                 />
                 <Stack.Screen name="WatchTrailer" component={WebView} />
+
+                {/* ADDED CAST MOVIE GLOBALLY HERE */}
+                <Stack.Screen name="CastMovie" component={CastMovie} />
               </Stack.Navigator>
             </NavigationContainer>
             <NotificationPromptModal

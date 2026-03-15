@@ -36,8 +36,8 @@ android {
         applicationId 'com.vega.next'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 146
-        versionName "3.4.4"
+        versionCode 147
+        versionName "3.4.7"
 
         // OneSignal placeholders
         manifestPlaceholders = [

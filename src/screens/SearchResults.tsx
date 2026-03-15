@@ -5,7 +5,6 @@ import {
   View,
   FlatList,
   ListRenderItem,
-  InteractionManager,
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
@@ -24,12 +23,12 @@ interface SearchPageData {
   Posts: any[];
   filter: string;
   providerValue: string;
-  uniqueId: string; // CHANGED: Generated at runtime to prevent key collisions
+  uniqueId: string;
   name: string;
   category: string;
 }
 
-// --- COMPONENT: Type Filter Bar ---
+// --- COMPONENT: Type Filter Bar (Optimized) ---
 const TypeFilter = React.memo(
   ({
     types,
@@ -49,37 +48,38 @@ const TypeFilter = React.memo(
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{paddingHorizontal: 16, gap: 8}}
           keyboardShouldPersistTaps="handled">
-          {types.map(type => (
-            <TouchableOpacity
-              key={type}
-              onPress={() => onSelect(type)}
-              className={`px-4 py-1.5 rounded-full border ${
-                selectedType === type
-                  ? 'bg-primary border-primary'
-                  : 'bg-gray-900 border-gray-700'
-              }`}
-              style={
-                selectedType === type
-                  ? {backgroundColor: primary, borderColor: primary}
-                  : {}
-              }>
-              <Text
-                className={`${
-                  selectedType === type
-                    ? 'text-white font-semibold'
-                    : 'text-gray-400'
-                }`}>
-                {type}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {types.map(type => {
+            const isSelected = selectedType === type;
+            return (
+              <TouchableOpacity
+                key={type}
+                onPress={() => onSelect(type)}
+                className={`px-4 py-1.5 rounded-full border ${
+                  isSelected
+                    ? 'bg-primary border-primary'
+                    : 'bg-gray-900 border-gray-700'
+                }`}
+                style={
+                  isSelected
+                    ? {backgroundColor: primary, borderColor: primary}
+                    : {}
+                }>
+                <Text
+                  className={`${
+                    isSelected ? 'text-white font-semibold' : 'text-gray-400'
+                  }`}>
+                  {type}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
     );
   },
 );
 
-// --- COMPONENT: Memoized Result Item ---
+// --- COMPONENT: Result Item (Strictly Memoized) ---
 const SearchResultItem = React.memo(
   ({item, filter}: {item: SearchPageData; filter: string}) => {
     return (
@@ -89,13 +89,12 @@ const SearchResultItem = React.memo(
           title={item.name}
           posts={item.Posts}
           filter={filter}
-          providerValue={item.value} // Keep original value for navigation/logic
+          providerValue={item.providerValue}
           isSearch={true}
         />
       </View>
     );
   },
-  // Strict equality check to prevent re-renders
   (prev, next) =>
     prev.item.uniqueId === next.item.uniqueId && prev.filter === next.filter,
 );
@@ -143,8 +142,7 @@ const SearchResults = ({route}: Props): React.ReactElement => {
   const queue = useRef<SearchPageData[]>([]);
   const hasLoadedFirstItem = useRef(false);
 
-  // --- LOGIC 1: Safe Filter Extraction ---
-  // We use the raw installedProviders list to build categories
+  // --- LOGIC 1: Categories ---
   const uniqueTypes = useMemo(() => {
     const types = new Set<string>();
     installedProviders.forEach((p: any) => {
@@ -163,33 +161,28 @@ const SearchResults = ({route}: Props): React.ReactElement => {
     };
   }, []);
 
-  // --- LOGIC 2: The Robust Search Engine ---
+  // --- LOGIC 2: Optimized Search Engine ---
   useEffect(() => {
     const abortController = new AbortController();
     const signal = abortController.signal;
 
-    // A. SETUP: Reset everything
+    // Reset
     setSearchData([]);
     queue.current = [];
     hasLoadedFirstItem.current = false;
-
-    // We do NOT filter uniqueProviders here anymore.
-    // We want to fetch everything the user has installed, even duplicates.
     setLoadingCount(installedProviders.length);
 
-    // B. BATCH FLUSHER (The "Anti-Freeze" Mechanism)
-    // Updates UI every 500ms to allow clicks to register
+    // A. BATCH FLUSHER (UI Updater)
+    // Updates UI every 200ms (faster than 500ms) to feel snappier
     const batchInterval = setInterval(() => {
       if (queue.current.length > 0) {
-        // Atomic update: take everything currently in queue and clear it
         const batch = [...queue.current];
         queue.current = [];
         setSearchData(prev => [...prev, ...batch]);
       }
-    }, 500);
+    }, 200);
 
-    // C. FETCHER FUNCTION
-    // We pass 'index' to generate a truly unique ID for the UI
+    // B. FETCH FUNCTION
     const fetchOneProvider = async (
       provider: (typeof installedProviders)[0],
       index: number,
@@ -204,36 +197,31 @@ const SearchResults = ({route}: Props): React.ReactElement => {
 
         if (signal.aborted || !isMounted.current) return;
 
+        // Decrement loading count safely
         setLoadingCount(prev => Math.max(0, prev - 1));
 
         if (data && data.length > 0) {
-          // CATEGORY FORMATTING
           const providerCat = provider.category || 'Others';
           const formattedCat =
             providerCat.charAt(0).toUpperCase() +
             providerCat.slice(1).toLowerCase();
 
-          // DATA OBJECT
           const newData: SearchPageData = {
             title: provider.display_name,
             Posts: data,
             filter: currentFilter,
             providerValue: provider.value,
-            // CRITICAL FIX: Append index to value to guarantee uniqueness
-            // This fixes "Missing Results" AND "Duplicate Key" crashes simultaneously
             uniqueId: `${provider.value}-${index}`,
             value: provider.value,
             name: provider.display_name,
             category: formattedCat,
           };
 
-          // D. FASTEST FIRST LOGIC
+          // Immediate render for the very first result
           if (!hasLoadedFirstItem.current) {
             hasLoadedFirstItem.current = true;
-            // Render immediately (bypass queue)
             setSearchData(prev => [...prev, newData]);
           } else {
-            // Add to queue for batched rendering
             queue.current.push(newData);
           }
         }
@@ -244,18 +232,33 @@ const SearchResults = ({route}: Props): React.ReactElement => {
       }
     };
 
-    // E. EXECUTION (Wait for Navigation)
-    const task = InteractionManager.runAfterInteractions(() => {
-      // We map over ALL installedProviders, passing the index
-      installedProviders.forEach((provider, index) => {
-        fetchOneProvider(provider, index);
-      });
-    });
+    // C. STAGGERED EXECUTION LOOP
+    // We fetch in chunks of 4 to prevent freezing the JS bridge on Android
+    const runSearch = async () => {
+      const BATCH_SIZE = 4;
+      const STAGGER_DELAY = 100; // ms
+
+      for (let i = 0; i < installedProviders.length; i += BATCH_SIZE) {
+        if (signal.aborted) break;
+
+        const batch = installedProviders.slice(i, i + BATCH_SIZE);
+        // Fire requests in parallel for this batch
+        batch.forEach((provider, idx) => {
+          fetchOneProvider(provider, i + idx);
+        });
+
+        // Small delay before firing the next batch to let UI breathe
+        if (i + BATCH_SIZE < installedProviders.length) {
+          await new Promise(resolve => setTimeout(resolve, STAGGER_DELAY));
+        }
+      }
+    };
+
+    runSearch();
 
     return () => {
       abortController.abort();
       clearInterval(batchInterval);
-      task.cancel();
     };
   }, [currentFilter, installedProviders]);
 
@@ -275,7 +278,6 @@ const SearchResults = ({route}: Props): React.ReactElement => {
       <FlatList
         data={filteredData}
         renderItem={renderItem}
-        // KEY EXTRACTOR: Uses the runtime generated ID
         keyExtractor={item => item.uniqueId}
         ListHeaderComponent={
           <View>
@@ -294,13 +296,13 @@ const SearchResults = ({route}: Props): React.ReactElement => {
             )}
           </View>
         }
-        // --- PERFORMANCE CONFIG ---
-        initialNumToRender={1}
-        maxToRenderPerBatch={1} // Keeps UI thread free for clicking
-        updateCellsBatchingPeriod={100}
-        windowSize={4}
-        removeClippedSubviews={true}
-        keyboardShouldPersistTaps="always"
+        // --- PERFORMANCE CONFIG (Optimized for Android) ---
+        initialNumToRender={3} // Render enough to fill screen immediately
+        maxToRenderPerBatch={2} // Process smaller batches to keep FPS high
+        updateCellsBatchingPeriod={50} // Update frequently
+        windowSize={5} // Keep memory footprint low (5 screens worth of content)
+        removeClippedSubviews={true} // Critical for Android list performance
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{paddingBottom: 40}}
         ListEmptyComponent={

@@ -1,19 +1,12 @@
-import {View, Text, FlatList, Image} from 'react-native';
+import {View, Text, FlatList, TextInput, TouchableOpacity} from 'react-native';
 import React, {useState, useEffect, useCallback} from 'react';
 import {useNavigation} from '@react-navigation/native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {SearchStackParamList} from '../App';
 import {MaterialIcons, Ionicons, Feather} from '@expo/vector-icons';
-import {TextInput} from 'react-native';
-import {TouchableOpacity} from 'react-native';
 import useThemeStore from '../lib/zustand/themeStore';
 import {MMKV} from '../lib/Mmkv';
 import {SafeAreaView} from 'react-native-safe-area-context';
-import Animated, {
-  FadeInDown,
-  SlideInRight,
-  Layout,
-} from 'react-native-reanimated';
 import debounce from 'lodash/debounce';
 import {searchOMDB} from '../lib/services/omdb';
 import {OMDBResult} from '../types/omdb';
@@ -50,7 +43,7 @@ interface IMDBResult {
 }
 
 // Hardcoded movie suggestions for specific genres
-const GENRE_MOVIES = {
+const GENRE_MOVIES: Record<string, any[]> = {
   'sci-fi': [
     {
       Title: 'Avengers: Endgame',
@@ -106,23 +99,18 @@ const GENRE_MOVIES = {
   horror: [
     {Title: 'The Conjuring', Year: '2013', imdbID: 'tt1457767', Type: 'movie'},
     {Title: 'Hereditary', Year: '2018', imdbID: 'tt7784604', Type: 'movie'},
-  ], // Add other genres as needed
+  ],
 };
 
-// Helper components for a cleaner render function
-const RenderHeader = ({title, index}: {title: string; index: number}) => (
-  <Animated.View
-    entering={FadeInDown.delay(index * 50)}
-    layout={Layout.springify()}
-    className="mt-4 mb-2 px-4">
+// Helper components converted to standard Views for performance
+const RenderHeader = ({title}: {title: string; index: number}) => (
+  <View className="mt-4 mb-2 px-4">
     <Text className="text-white/90 text-base font-semibold">{title}</Text>
-  </Animated.View>
+  </View>
 );
 
-const RenderGenreItem = ({item, index, primary, handleSearch}: any) => (
-  <Animated.View
-    entering={FadeInDown.delay(index * 50)}
-    layout={Layout.springify()}>
+const RenderGenreItem = ({item, primary, handleSearch}: any) => (
+  <View>
     <View className="px-4">
       <TouchableOpacity
         className="py-3 border-b border-white/10"
@@ -138,13 +126,11 @@ const RenderGenreItem = ({item, index, primary, handleSearch}: any) => (
         </View>
       </TouchableOpacity>
     </View>
-  </Animated.View>
+  </View>
 );
 
-const RenderMovieItem = ({item, index, primary, handleSearch}: any) => (
-  <Animated.View
-    entering={FadeInDown.delay(index * 50)}
-    layout={Layout.springify()}>
+const RenderMovieItem = ({item, primary, handleSearch}: any) => (
+  <View>
     <View className="px-4">
       <TouchableOpacity
         className="py-3 border-b border-white/10"
@@ -158,7 +144,6 @@ const RenderMovieItem = ({item, index, primary, handleSearch}: any) => (
           />
           <View>
             <Text className="text-white text-base">{item.Title || item.l}</Text>
-            {/* FIX: Ensure subtitle is a single concatenated string inside Text */}
             <Text className="text-white/50 text-xs">
               {((item.Type || item.q) === 'series' || item.q === 'tv_series'
                 ? 'TV Show'
@@ -170,7 +155,7 @@ const RenderMovieItem = ({item, index, primary, handleSearch}: any) => (
         </View>
       </TouchableOpacity>
     </View>
-  </Animated.View>
+  </View>
 );
 
 const Search = () => {
@@ -217,7 +202,6 @@ const Search = () => {
     )}.json`;
     try {
       const response = await fetch(url);
-      // NOTE: This API may return JSONP. The logic for stripping it is in Suggestion.tsx, but assuming plain JSON here.
       const data = await response.json();
       if (data.d) {
         return data.d.slice(0, MAX_VISIBLE_RESULTS);
@@ -252,7 +236,6 @@ const Search = () => {
 
           const omdbResults = await searchOMDB(text);
 
-          // FIX FOR CRASH: Check if omdbResults is a valid array before reducing
           if (omdbResults && Array.isArray(omdbResults)) {
             const uniqueOmdbResults = omdbResults.reduce((acc, current) => {
               const x = acc.find(
@@ -266,7 +249,6 @@ const Search = () => {
             }, [] as OMDBResult[]);
             setOmdbResults(uniqueOmdbResults.slice(0, MAX_VISIBLE_RESULTS));
           } else {
-            // If OMDB returns a non-array response (e.g., an error object), clear results
             setOmdbResults([]);
           }
 
@@ -318,7 +300,6 @@ const Search = () => {
   const showHistory = !isSearching && searchHistory.length > 0;
 
   const combinedData = [
-    // Add a header for Genre suggestions if there are any
     ...(genreSuggestions.length > 0
       ? [{id: 'genre-header', type: 'header', title: 'Genres'}]
       : []),
@@ -374,25 +355,19 @@ const Search = () => {
     return null;
   };
 
-  const AnimatedContainer = Animated.View;
-
   let contentToRender;
 
   if (isLoading) {
     contentToRender = (
-      <AnimatedContainer
-        entering={FadeInDown}
-        className="flex-1 items-center justify-center">
+      <View className="flex-1 items-center justify-center">
         <Text className="text-white/70 text-base">Searching...</Text>
-      </AnimatedContainer>
+      </View>
     );
   } else if (error) {
     contentToRender = (
-      <AnimatedContainer
-        entering={FadeInDown}
-        className="flex-1 items-center justify-center px-4">
+      <View className="flex-1 items-center justify-center px-4">
         <Text className="text-red-500 text-base text-center">{error}</Text>
-      </AnimatedContainer>
+      </View>
     );
   } else if (showResultsAndSuggestions) {
     contentToRender = (
@@ -404,14 +379,16 @@ const Search = () => {
         renderItem={renderItem}
         contentContainerStyle={{paddingTop: 4}}
         showsVerticalScrollIndicator={false}
+        // Optimization props for FlatList on Android
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        initialNumToRender={10}
       />
     );
   } else if (showHistory) {
     contentToRender = (
-      <AnimatedContainer
-        entering={SlideInRight.springify()}
-        layout={Layout.springify()}
-        className="px-4 flex-1">
+      <View className="px-4 flex-1">
         <View className="flex-row items-center justify-between mb-2">
           <Text className="text-white/90 text-base font-semibold">
             Recent Searches
@@ -445,14 +422,12 @@ const Search = () => {
             </View>
           )}
         />
-      </AnimatedContainer>
+      </View>
     );
   } else {
-    // Empty State - Only show when no history and no results
+    // Empty State
     contentToRender = (
-      <AnimatedContainer
-        layout={Layout.springify()}
-        className="items-center justify-center flex-1">
+      <View className="items-center justify-center flex-1">
         <View className="bg-white/5 rounded-full p-6 mb-4">
           <Ionicons name="search" size={32} color={primary} />
         </View>
@@ -460,17 +435,14 @@ const Search = () => {
         <Text className="text-white/40 text-sm text-center mt-1">
           Your recent searches will appear here
         </Text>
-      </AnimatedContainer>
+      </View>
     );
   }
 
   return (
     <SafeAreaView className="flex-1 bg-black">
       {/* Title Section */}
-      <AnimatedContainer
-        entering={FadeInDown.springify()}
-        layout={Layout.springify()}
-        className="px-4 pt-4">
+      <View className="px-4 pt-4">
         <View className="flex-row justify-between items-center mb-3">
           <Text className="text-white text-xl font-bold">Search</Text>
           <TouchableOpacity
@@ -512,20 +484,9 @@ const Search = () => {
             </View>
           </View>
         </View>
-      </AnimatedContainer>
+      </View>
       {/* Search Results and Suggestions */}
-      <AnimatedContainer
-        layout={Layout.springify()}
-        className="flex-1"
-        key={
-          showResultsAndSuggestions
-            ? 'results'
-            : showHistory
-            ? 'history'
-            : 'empty'
-        }>
-        {contentToRender}
-      </AnimatedContainer>
+      <View className="flex-1">{contentToRender}</View>
     </SafeAreaView>
   );
 };

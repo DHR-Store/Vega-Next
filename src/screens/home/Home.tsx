@@ -1,9 +1,12 @@
 import {
   SafeAreaView,
-  ScrollView,
   RefreshControl,
   View,
   Text,
+  FlatList,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
+  Platform,
 } from 'react-native';
 import Slider from '../../components/Slider';
 import React, {useCallback, useMemo, useRef, useState} from 'react';
@@ -33,6 +36,9 @@ const Home = ({}: Props) => {
   const {primary} = useThemeStore(state => state);
   const [backgroundColor, setBackgroundColor] = useState('transparent');
   const drawer = useRef<DrawerLayout>(null);
+
+  // Note: If you need to track drawer state, you should add onDrawerOpen/Close handlers
+  // For now, keeping as is from original code
   const [isDrawerOpen] = useState(false);
 
   // Memoize static values
@@ -44,25 +50,32 @@ const Home = ({}: Props) => {
   const {provider, installedProviders} = useContentStore(state => state);
   const {setHero} = useHeroStore(state => state);
 
-  // React Query for home page data with better error handling
+  // React Query for home page data
   const {
     data: homeData = [],
     isLoading,
     error,
     refetch,
     isRefetching,
-    // isStale,
   } = useHomePageData({
     provider,
     enabled: !!(installedProviders?.length && provider?.value),
   });
 
-  // Memoized scroll handler
-  const handleScroll = useCallback((event: any) => {
-    const newBackgroundColor =
-      event.nativeEvent.contentOffset.y > 0 ? 'black' : 'transparent';
-    setBackgroundColor(newBackgroundColor);
-  }, []);
+  // Optimized Scroll Handler: Only updates state when absolutely necessary
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const scrollY = event.nativeEvent.contentOffset.y;
+      // Add a small threshold (10) to prevent flickering at the very top
+      const newBackgroundColor = scrollY > 10 ? 'black' : 'transparent';
+
+      // Prevent unnecessary re-renders by checking previous state
+      if (backgroundColor !== newBackgroundColor) {
+        setBackgroundColor(newBackgroundColor);
+      }
+    },
+    [backgroundColor],
+  );
 
   // Stable hero post calculation
   const heroPost = useMemo(() => {
@@ -81,7 +94,6 @@ const Home = ({}: Props) => {
     }
   }, [heroPost, setHero]);
 
-  // Optimized refresh handler
   const handleRefresh = useCallback(async () => {
     try {
       await refetch();
@@ -90,55 +102,63 @@ const Home = ({}: Props) => {
     }
   }, [refetch]);
 
-  // Memoized loading skeleton
-  const loadingSliders = useMemo(() => {
-    if (!provider?.value) {
-      return [];
-    }
+  // DATA PREPARATION FOR FLATLIST
 
-    return providerManager
-      .getCatalog({providerValue: provider.value})
-      .map((item, index) => (
-        <Slider
-          isLoading={true}
-          key={`loading-${item.filter}-${index}`}
-          title={item.title}
-          posts={[]}
-          filter={item.filter}
-        />
-      ));
+  // 1. Prepare Skeleton Data
+  const skeletonData = useMemo(() => {
+    if (!provider?.value) return [];
+    return providerManager.getCatalog({providerValue: provider.value});
   }, [provider?.value]);
 
-  // Memoized content sliders
-  const contentSliders = useMemo(() => {
-    return homeData.map((item, index) => (
-      <Slider
-        isLoading={false}
-        key={`content-${item.filter}-${index}`}
-        title={item.title}
-        posts={item.Posts}
-        filter={item.filter}
-      />
-    ));
-  }, [homeData]);
+  // 2. Determine Active Data Source
+  const listData = useMemo(() => {
+    if (isLoading) return skeletonData;
+    return homeData;
+  }, [isLoading, skeletonData, homeData]);
 
-  // Memoized error message
-  const errorComponent = useMemo(() => {
-    if (!error && (isLoading || homeData.length > 0)) {
-      return null;
-    }
+  // 3. Render Item for FlatList (Optimized)
+  const renderItem = useCallback(
+    ({item, index}: {item: any; index: number}) => {
+      return (
+        <Slider
+          isLoading={isLoading}
+          title={item.title}
+          posts={isLoading ? [] : item.Posts}
+          filter={item.filter}
+        />
+      );
+    },
+    [isLoading],
+  );
 
+  // 4. Header Component (Hero + ContinueWatching)
+  const ListHeader = useMemo(() => {
     return (
-      <View className="p-4 m-4 bg-red-500/20 rounded-lg min-h-64 flex-1 justify-center items-center">
-        <Text className="text-red-400 text-center font-medium">
-          {error?.message || 'Failed to load content'}
-        </Text>
-        <Text className="text-gray-400 text-center text-sm mt-1">
-          Pull to refresh and try again
-        </Text>
+      <View>
+        <HeroOptimized drawerRef={drawer} isDrawerOpen={isDrawerOpen} />
+        <ContinueWatching />
+        {/* Margin fix for the first slider */}
+        <View className="-mt-6 relative z-20" />
       </View>
     );
-  }, [error, isLoading, homeData.length]);
+  }, [isDrawerOpen]); // Add dependencies if HeroOptimized props change
+
+  // 5. Footer Component (Error Message / Spacing)
+  const ListFooter = useMemo(() => {
+    if (error) {
+      return (
+        <View className="p-4 m-4 bg-red-500/20 rounded-lg min-h-64 flex-1 justify-center items-center">
+          <Text className="text-red-400 text-center font-medium">
+            {error?.message || 'Failed to load content'}
+          </Text>
+          <Text className="text-gray-400 text-center text-sm mt-1">
+            Pull to refresh and try again
+          </Text>
+        </View>
+      );
+    }
+    return <View className="h-16" />;
+  }, [error]);
 
   // Early return for no providers
   if (
@@ -159,24 +179,40 @@ const Home = ({}: Props) => {
             drawerLockMode={disableDrawer ? 'locked-closed' : 'unlocked'}
             drawerType="front"
             edgeWidth={70}
-            useNativeAnimations={false}
+            // Removing useNativeAnimations={false} usually helps performance on supported versions,
+            // or defaults to correct behavior for the platform.
             ref={drawer}
             drawerBackgroundColor="transparent"
             renderNavigationView={() =>
               !disableDrawer && <ProviderDrawer drawerRef={drawer} />
             }>
             <StatusBar
-              style="auto"
+              style="light"
               animated={true}
               translucent={true}
               backgroundColor={backgroundColor}
             />
 
-            <ScrollView
-              onScroll={handleScroll}
-              scrollEventThrottle={16} // Optimize scroll performance
-              showsVerticalScrollIndicator={false}
+            <FlatList
+              data={listData}
+              renderItem={renderItem}
+              keyExtractor={(item, index) =>
+                `${item.filter || 'section'}-${index}`
+              }
+              // Performance Props for Android
+              removeClippedSubviews={true} // Unmounts off-screen views (Crucial for Android)
+              maxToRenderPerBatch={5} // Reduces JS load per frame
+              windowSize={5} // Reduces memory usage
+              initialNumToRender={3} // Speeds up initial load
+              // Header & Footer
+              ListHeaderComponent={ListHeader}
+              ListFooterComponent={ListFooter}
+              // Styles & scroll behavior
               className="bg-black"
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              showsVerticalScrollIndicator={false}
+              overScrollMode="never" // Removes Android glow effect for cleaner look
               refreshControl={
                 <RefreshControl
                   colors={[primary]}
@@ -185,18 +221,8 @@ const Home = ({}: Props) => {
                   refreshing={isRefetching}
                   onRefresh={handleRefresh}
                 />
-              }>
-              <HeroOptimized drawerRef={drawer} isDrawerOpen={isDrawerOpen} />
-
-              <ContinueWatching />
-
-              <View className="-mt-6 relative z-20">
-                {isLoading ? loadingSliders : contentSliders}
-                {errorComponent}
-              </View>
-
-              <View className="h-16" />
-            </ScrollView>
+              }
+            />
           </DrawerLayout>
         </SafeAreaView>
       </GestureHandlerRootView>
