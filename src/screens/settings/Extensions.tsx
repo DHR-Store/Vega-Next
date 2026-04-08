@@ -683,6 +683,11 @@ const Extensions = ({navigation}: Props) => {
               )}
             </>
           )}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('AddExtension' as any)}
+            className="ml-1 mr-2">
+            <AntDesign name="pluscircleo" size={22} color={primary} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={handleRefresh}>
             <Feather name="refresh-cw" size={24} color={primary} />
           </TouchableOpacity>

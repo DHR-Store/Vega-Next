@@ -16,6 +16,44 @@ export class DownloadManager {
     return DownloadManager.instance;
   }
 
+  /**
+   * FIX: Reload the in-memory downloads map from persistent MMKV storage.
+   *
+   * Why needed: The in-memory Map is set once at construction. If downloads
+   * are updated by a background/foreground service while the app was closed,
+   * the in-memory state becomes stale. Call this when the app comes back to
+   * the foreground (AppState 'active') to get the latest persisted state.
+   */
+  refreshFromStorage(): void {
+    this.downloads = downloadsStorage.getDownloads();
+  }
+
+  /**
+   * FIX: Reset any downloads stuck in 'downloading' status back to 'paused'.
+   *
+   * Why needed: When the app is killed from the task manager while a download
+   * is active, the download status in MMKV stays as 'downloading' forever
+   * (the JS thread died mid-download). On next app launch, those downloads
+   * would falsely show as "in progress" but nothing is actually downloading.
+   *
+   * This method must be called once on app startup (in App.tsx useEffect).
+   * After calling this, the user can see which downloads are paused/incomplete
+   * and can manually resume them.
+   */
+  resetStaleDownloads(): void {
+    let hasChanges = false;
+    this.downloads.forEach((download, id) => {
+      if (download.status === 'downloading') {
+        download.status = 'paused';
+        this.downloads.set(id, download);
+        hasChanges = true;
+      }
+    });
+    if (hasChanges) {
+      downloadsStorage.saveDownloads(this.downloads);
+    }
+  }
+
   updateDownloadStatus(
     id: string,
     status: 'downloading' | 'paused' | 'downloaded',
@@ -99,3 +137,4 @@ export class DownloadManager {
 }
 
 export const downloadManager = DownloadManager.getInstance();
+

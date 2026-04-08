@@ -1,17 +1,27 @@
-
 import axios from 'axios';
 import {
   extensionStorage,
   ProviderExtension,
   ProviderModule,
 } from '../storage/extensionStorage';
+
+// Extend the interface locally so TypeScript knows about sourceUrl and original_value
+export interface DynamicProviderExtension extends ProviderExtension {
+  sourceUrl?: string;
+  original_value?: string; // Track original folder name to avoid 404s
+}
+
 /**
  * Extension manager service for handling dynamic provider loading
  */
 export class ExtensionManager {
   private static instance: ExtensionManager;
+  
   private baseUrl =
     'https://raw.githubusercontent.com/DHR-Store/vega-providers/refs/heads/main';
+
+  // --- ADDED: Your Fine-grained GitHub PAT ---
+  private githubToken = 'YOUR_GITHUB_PAT';
 
   private testMode = false;
   private baseUrlTestMode = '';
@@ -32,6 +42,75 @@ export class ExtensionManager {
     return ExtensionManager.instance;
   }
 
+  // --- Parse the input string into a valid raw GitHub URL ---
+  public getBaseUrlFromInput(input: string): string {
+    if (input.startsWith('http')) return input;
+    const parts = input.trim().split('/');
+    const user = parts[0];
+    const repo = parts.length > 1 ? `${parts[1]}-vega-providers` : 'vega-providers';
+    return `https://raw.githubusercontent.com/${user}/${repo}/refs/heads/main`;
+  }
+
+  // --- Format shorthand for Namespacing ---
+  public getRepoShorthand(input: string): string {
+    if (input.startsWith('http')) {
+      const stripped = input.replace('https://raw.githubusercontent.com/', '');
+      const parts = stripped.split('/');
+      const user = parts[0];
+      const repo = parts[1];
+      if (repo === 'vega-providers') return user;
+      if (repo.endsWith('-vega-providers')) return `${user}/${repo.replace('-vega-providers', '')}`;
+      return `${user}/${repo}`;
+    }
+    const parts = input.trim().split('/');
+    return parts.length > 1 ? `${parts[0]}-${parts[1]}` : parts[0];
+  }
+
+  // --- Fetch manifest from a custom repository with Token & Cache Busting ---
+  async fetchCustomManifest(repoInput: string): Promise<DynamicProviderExtension[]> {
+    try {
+      const customBaseUrl = this.getBaseUrlFromInput(repoInput);
+      const repoShorthand = this.getRepoShorthand(repoInput);
+      
+      // ADDED ?t=Date.now() to bypass GitHub's aggressive 5-minute CDN cache
+      const manifestUrl = `${customBaseUrl}/manifest.json?t=${Date.now()}`;
+      console.log('Fetching custom manifest from:', manifestUrl);
+      
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${this.githubToken}`,
+        Accept: 'application/vnd.github.v3.raw',
+      };
+
+      const response = await axios.get(manifestUrl, { 
+        timeout: 10000, 
+        headers 
+      });
+
+      if (!response.data || !Array.isArray(response.data)) {
+        throw new Error('Invalid manifest format');
+      }
+
+      const providers: DynamicProviderExtension[] = response.data.map((item: any) => ({
+        // NAMESPACE the value so identical providers from different repos don't conflict
+        value: `${repoShorthand}_${item.value}`, 
+        original_value: item.value, // Save the actual name to fetch the correct folders
+        display_name: `${item.display_name} (${repoShorthand})`,
+        disabled: item.disabled || false,
+        version: item.version,
+        icon: item.icon || '',
+        type: item.type || 'global',
+        category: item.category || '',
+        installed: false,
+        sourceUrl: customBaseUrl, // Attach the custom URL
+      }));
+
+      return providers;
+    } catch (error) {
+      console.error('Failed to fetch custom manifest:', error);
+      throw error;
+    }
+  }
+
   /**
    * Fetch latest manifest from GitHub
    */
@@ -45,12 +124,20 @@ export class ExtensionManager {
         }
       }
 
+      // ADDED ?t=Date.now() to bypass GitHub CDN cache
       const manifestUrl = this.testMode
-        ? `${this.baseUrlTestMode}/manifest.json`
-        : this.manifestUrl;
+        ? `${this.baseUrlTestMode}/manifest.json?t=${Date.now()}`
+        : `${this.manifestUrl}?t=${Date.now()}`;
       console.log('Fetching manifest from:', manifestUrl);
+      
+      const headers: Record<string, string> = this.testMode ? {} : {
+        Authorization: `Bearer ${this.githubToken}`,
+        Accept: 'application/vnd.github.v3.raw',
+      };
+
       const response = await axios.get(manifestUrl, {
         timeout: 10000,
+        headers
       });
 
       if (!response.data || !Array.isArray(response.data)) {
@@ -88,12 +175,16 @@ export class ExtensionManager {
 
   /**
    * Download and cache provider modules
+   * MODIFIED: Uses originalValue parameter to construct correct paths
    */
   async downloadProviderModules(
     providerValue: string,
     version: string,
+    sourceUrl?: string,
+    originalValue?: string
   ): Promise<ProviderModule> {
-    if (this.testMode) {
+    // If a custom sourceUrl is provided, we bypass test mode to ensure we fetch from the remote repo
+    if (this.testMode && !sourceUrl) {
       return this.downloadTestProviderModule(providerValue);
     }
     try {
@@ -101,21 +192,30 @@ export class ExtensionManager {
       const optionalFiles = ['episodes'];
       const allFiles = [...requiredFiles, ...optionalFiles];
 
+      const activeBaseUrl = sourceUrl || this.baseUrl;
+      const downloadFolder = originalValue || providerValue; // Use original un-prefixed folder name
+
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${this.githubToken}`,
+        Accept: 'application/vnd.github.v3.raw',
+      };
+
       const modules: Record<string, string> = {};
       const downloadPromises = allFiles.map(async fileName => {
         try {
-          const url = `${this.baseUrl}/dist/${providerValue}/${fileName}.js`;
+          // CACHE BUSTING ADDED HERE to fetch fresh .js files
+          const url = `${activeBaseUrl}/dist/${downloadFolder}/${fileName}.js?t=${Date.now()}`;
           console.log(`Downloading: ${url}`);
 
           const response = await axios.get(url, {
             timeout: 15000,
+            headers
           });
 
           if (response.data) {
             modules[fileName] = response.data;
           }
         } catch (error) {
-          // Only log error for required files
           if (requiredFiles.includes(fileName)) {
             console.error(
               `Failed to download ${fileName}.js for ${providerValue}:`,
@@ -132,7 +232,6 @@ export class ExtensionManager {
 
       await Promise.all(downloadPromises);
 
-      // Verify required files were downloaded
       const missingRequired = requiredFiles.filter(file => !modules[file]);
       if (missingRequired.length > 0) {
         throw new Error(
@@ -141,7 +240,7 @@ export class ExtensionManager {
       }
 
       const providerModule: ProviderModule = {
-        value: providerValue,
+        value: providerValue, // Maintain prefixed cache state globally
         version,
         modules: {
           posts: modules.posts,
@@ -174,7 +273,8 @@ export class ExtensionManager {
       const modules: Record<string, string> = {};
       const downloadPromises = allFiles.map(async fileName => {
         try {
-          const fileUrl = `${url}${fileName}.js`;
+          // CACHE BUSTING ADDED HERE
+          const fileUrl = `${url}${fileName}.js?t=${Date.now()}`;
           console.log(`Downloading test module: ${fileUrl}`);
 
           const response = await axios.get(fileUrl, {
@@ -187,7 +287,6 @@ export class ExtensionManager {
             throw new Error(`No data received for ${fileName}`);
           }
         } catch (error) {
-          // Only log error for required files
           if (requiredFiles.includes(fileName)) {
             console.error(
               `Failed to download ${fileName}.js for ${providerValue}:`,
@@ -221,7 +320,6 @@ export class ExtensionManager {
         cachedAt: Date.now(),
       };
 
-      // Cache the test module
       this.testModuleCache.set(providerValue, {
         module: providerModule,
         cachedAt: Date.now(),
@@ -239,15 +337,12 @@ export class ExtensionManager {
 
   /**
    * Install a provider
+   * MODIFIED: Support sourceUrl and original_value extraction
    */
-  async installProvider(provider: ProviderExtension): Promise<void> {
+  async installProvider(provider: DynamicProviderExtension): Promise<void> {
     try {
-      // Download the provider modules
-      await this.downloadProviderModules(provider.value, provider.version);
-
-      // Mark as installed
+      await this.downloadProviderModules(provider.value, provider.version, provider.sourceUrl, provider.original_value);
       extensionStorage.installProvider(provider);
-
       console.log(`Successfully installed provider: ${provider.display_name}`);
     } catch (error) {
       console.error(
@@ -268,15 +363,12 @@ export class ExtensionManager {
 
   /**
    * Update a provider
+   * MODIFIED: Support sourceUrl and original_value extraction
    */
-  async updateProvider(provider: ProviderExtension): Promise<void> {
+  async updateProvider(provider: DynamicProviderExtension): Promise<void> {
     try {
-      // Download updated modules
-      await this.downloadProviderModules(provider.value, provider.version);
-
-      // Update installation record
+      await this.downloadProviderModules(provider.value, provider.version, provider.sourceUrl, provider.original_value);
       extensionStorage.installProvider(provider);
-
       console.log(`Successfully updated provider: ${provider.display_name}`);
     } catch (error) {
       console.error(
@@ -286,50 +378,32 @@ export class ExtensionManager {
       throw error;
     }
   }
-  /**
-   * Get cached provider modules (works synchronously for both normal and test mode)
-   */
+
   getProviderModules(providerValue: string): ProviderModule | undefined {
     if (this.testMode) {
-      // In test mode, return cached test module and trigger background refresh
       const cached = this.testModuleCache.get(providerValue);
       if (cached) {
-        // Trigger background refresh for next call
         this.refreshTestModuleInBackground(providerValue);
-
         return cached.module;
       }
       this.refreshTestModuleInBackground(providerValue);
-
-      // If no test cache exists, fall back to regular cache
       console.warn(
         `No test module cache found for ${providerValue}, falling back to regular cache`,
       );
     }
-
     return extensionStorage.getProviderModules(providerValue);
   }
 
-  /**
-   * Check if provider needs update
-   */
   checkForUpdates(): ProviderExtension[] {
     return extensionStorage.getProvidersNeedingUpdate();
   }
 
-  /**
-   * Initialize extension system
-   */
   async initialize(): Promise<void> {
     try {
-      // Load providers from cache
       const installed = extensionStorage.getInstalledProviders();
       const available = extensionStorage.getAvailableProviders();
-
       console.log(`Loaded ${installed.length} installed providers`);
       console.log(`Loaded ${available.length} available providers`);
-
-      // Try to fetch latest manifest if cache is expired
       if (extensionStorage.isManifestCacheExpired()) {
         try {
           await this.fetchManifest(false);
@@ -342,34 +416,24 @@ export class ExtensionManager {
     }
   }
 
-  /**
-   * Enable/disable test mode
-   */
   setTestMode(enabled: boolean): void {
     this.testMode = enabled;
     console.log(`Test mode ${enabled ? 'enabled' : 'disabled'}`);
   }
-  /**
-   * Check if test module cache is expired
-   */
+
   private isTestModuleCacheExpired(providerValue: string): boolean {
     const cached = this.testModuleCache.get(providerValue);
     if (!cached) {
       return true;
     }
-
     return Date.now() - cached.cachedAt > this.testModuleCacheExpiry;
   }
-  /**
-   * Pre-fetch test modules to ensure they're available synchronously
-   */
+
   async preFetchTestModules(providerValues: string[]): Promise<void> {
     if (!this.testMode) {
       return;
     }
-
     console.log('Pre-fetching test modules for:', providerValues);
-
     const fetchPromises = providerValues.map(async providerValue => {
       try {
         const module = await this.downloadTestProviderModule(providerValue);
@@ -385,18 +449,13 @@ export class ExtensionManager {
         );
       }
     });
-
     await Promise.allSettled(fetchPromises);
   }
-  /**
-   * Refresh test module in background if needed
-   */
+
   private refreshTestModuleInBackground(providerValue: string): void {
     if (!this.testMode) {
       return;
     }
-
-    // Refresh in background without blocking
     this.downloadTestProviderModule(providerValue)
       .then(module => {
         this.testModuleCache.set(providerValue, {
@@ -414,7 +473,4 @@ export class ExtensionManager {
   }
 }
 
-/**
- * Global extension manager instance
- */
 export const extensionManager = ExtensionManager.getInstance();

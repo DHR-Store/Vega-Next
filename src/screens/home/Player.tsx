@@ -11,10 +11,25 @@ import {
   AppState,
   AppStateStatus,
   TextInput,
-  Clipboard,
   KeyboardAvoidingView,
   Alert,
+  Share,
+  FlatList,
 } from 'react-native';
+// NOTE: Clipboard was removed from react-native core. Use @react-native-clipboard/clipboard
+// If not installed, we fall back to a Share-based copy approach below.
+let ClipboardModule: {setString: (s: string) => void} | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  ClipboardModule = require('@react-native-clipboard/clipboard').default;
+} catch (_) {}
+const setClipboard = (text: string) => {
+  if (ClipboardModule) {
+    ClipboardModule.setString(text);
+  } else {
+    Share.share({message: text}).catch(() => {});
+  }
+};
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -22,6 +37,7 @@ import Animated, {
   withRepeat,
   withSequence,
   withDelay,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../../App';
@@ -50,6 +66,7 @@ import {
   usePlayerSettings,
 } from '../../lib/hooks/usePlayerSettings';
 import FullScreenChz from 'react-native-fullscreen-chz';
+import {DiscordRPC} from '../../lib/services/DiscordRPC';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Player'>;
 
@@ -67,18 +84,17 @@ interface FirebaseConfig {
 }
 
 // --- FALLBACK CONFIGURATION ---
-/*const FALLBACK_FIREBASE_CONFIG: FirebaseConfig = {
-  apiKey: 'AIzaSyAesuaUddC4aXLjyMRl7VpFG2-0R36exRU',
-  authDomain: 'together-5dde5.firebaseapp.com',
-  databaseURL: 'https://together-5dde5-default-rtdb.firebaseio.com',
-  projectId: 'together-5dde5',
-  storageBucket: 'together-5dde5.appspot.com',
-  messagingSenderId: '435182801394',
-  appId: '1:435182801394:web:9e283ba6c8949aa70d9b6b',
-  measurementId: 'G-ZM6BDPE2M2',
-};*/
+const FALLBACK_FIREBASE_CONFIG: FirebaseConfig = {
+  apiKey: 'YOUR_FIREBASE_API_KEY',
+  authDomain: 'YOUR_FIREBASE_AUTH_DOMAIN',
+  databaseURL: 'YOUR_FIREBASE_DATABASE_URL',
+  projectId: 'YOUR_FIREBASE_PROJECT_ID',
+  storageBucket: 'YOUR_FIREBASE_STORAGE_BUCKET',
+  messagingSenderId: 'YOUR_FIREBASE_MESSAGING_SENDER_ID',
+  appId: 'YOUR_FIREBASE_APP_ID',
+  measurementId: 'YO',
+};
 
-// --- UTILITY FOR SANITIZING FIREBASE KEYS ---
 const sanitizeFirebaseKey = (key: string): string => {
   if (!key) return '';
   return key
@@ -101,7 +117,6 @@ const generateRandomId = (length: number = 6) => {
   return result;
 };
 
-// --- ROBUST BASE64 IMPLEMENTATION ---
 const toUTF8BinaryString = (str: string): string => {
   return encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (match, p1) =>
     String.fromCharCode(parseInt(p1, 16)),
@@ -192,7 +207,6 @@ const DEFAULT_SKIP_DURATION = 85;
 const FAST_FORWARD_DELAY_MS = 800;
 const MOCK_FAST_FORWARD_RATES = [1.5, 2.0, 3.0, 4.0];
 
-// --- PERSISTENCE LOADERS ---
 const getFastForwardRate = () => {
   const rateStr = cacheStorage.getString(KEY_FF_RATE);
   const rate = rateStr ? Number(rateStr) : DEFAULT_FF_RATE;
@@ -250,7 +264,6 @@ const useRealtimeSync = (
   );
   const [configLoading, setConfigLoading] = useState(true);
 
-  // Sanitized Session ID (Room ID)
   const safeSessionId = useMemo(
     () => sanitizeFirebaseKey(sessionId),
     [sessionId],
@@ -261,7 +274,6 @@ const useRealtimeSync = (
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
-        // YOUR Simple firebase server https://firebase.vercel.app
         const res = await fetch('YOUR FIRE BASE SERVER URL', {
           signal: controller.signal,
           headers: {'Cache-Control': 'no-cache'},
@@ -591,6 +603,149 @@ const NicknameInputOverlay = ({
   );
 };
 
+// --- EPISODE PANEL OVERLAY ---
+interface EpisodePanelProps {
+  visible: boolean;
+  onClose: () => void;
+  episodeList: any[];
+  activeEpisode: any;
+  onSelectEpisode: (episode: any) => void;
+  primary: string;
+}
+
+const EpisodePanelOverlay = ({
+  visible,
+  onClose,
+  episodeList,
+  activeEpisode,
+  onSelectEpisode,
+  primary,
+}: EpisodePanelProps) => {
+  if (!visible) return null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={onClose}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          zIndex: 60,
+        }}
+      />
+      {/* Panel */}
+      <View
+        style={{
+          position: 'absolute',
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 300,
+          backgroundColor: '#111',
+          zIndex: 61,
+          borderLeftWidth: 1,
+          borderLeftColor: 'rgba(255,255,255,0.1)',
+        }}
+        onTouchEnd={e => e.stopPropagation()}>
+        {/* Header */}
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: 12,
+            borderBottomWidth: 1,
+            borderBottomColor: 'rgba(255,255,255,0.1)',
+          }}>
+          <Text
+            style={{
+              color: 'white',
+              fontSize: 16,
+              fontWeight: 'bold',
+            }}>
+            Episodes ({episodeList.length})
+          </Text>
+          <TouchableOpacity onPress={onClose}>
+            <MaterialIcons name="close" size={22} color="white" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Episode List */}
+        <FlatList
+          data={episodeList}
+          keyExtractor={(item, index) => `ep-panel-${item.link}-${index}`}
+          initialScrollIndex={Math.max(
+            0,
+            episodeList.findIndex(e => e.link === activeEpisode?.link),
+          )}
+          getItemLayout={(_, index) => ({
+            length: 56,
+            offset: 56 * index,
+            index,
+          })}
+          renderItem={({item, index}) => {
+            const isActive = item.link === activeEpisode?.link;
+            return (
+              <TouchableOpacity
+                onPress={() => {
+                  onSelectEpisode(item);
+                  onClose();
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  padding: 10,
+                  paddingHorizontal: 14,
+                  height: 56,
+                  backgroundColor: isActive
+                    ? 'rgba(255,255,255,0.1)'
+                    : 'transparent',
+                  borderBottomWidth: 1,
+                  borderBottomColor: 'rgba(255,255,255,0.05)',
+                }}>
+                {isActive ? (
+                  <MaterialIcons
+                    name="play-arrow"
+                    size={20}
+                    color={primary}
+                    style={{marginRight: 8}}
+                  />
+                ) : (
+                  <Text
+                    style={{
+                      color: 'rgba(255,255,255,0.4)',
+                      width: 28,
+                      fontSize: 12,
+                    }}>
+                    {index + 1}
+                  </Text>
+                )}
+                <Text
+                  numberOfLines={2}
+                  style={{
+                    flex: 1,
+                    color: isActive ? primary : 'white',
+                    fontSize: 13,
+                    fontWeight: isActive ? '700' : '400',
+                    lineHeight: 18,
+                  }}>
+                  {item.title}
+                </Text>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      </View>
+    </>
+  );
+};
+
 const Player = ({route}: Props): React.JSX.Element => {
   const {primary} = useThemeStore(state => state);
   const {provider} = useContentStore();
@@ -602,11 +757,19 @@ const Player = ({route}: Props): React.JSX.Element => {
   const hasSetInitialTracksRef = useRef(false);
   const [keyForPlayer, setKeyForPlayer] = useState(0);
   const [showPlayer, setShowPlayer] = useState(true);
+  const isPipActiveRef = useRef(false);
+  const wasPlayingBeforePipRef = useRef(true);
+  const chatScrollRef = useRef<ScrollView>(null);
 
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartXRef = useRef(0);
   const touchStartYRef = useRef(0);
   const isMovingRef = useRef(false);
+
+  // ── FIX: Use refs for high-frequency values to prevent videoPlayerProps from
+  //         recomputing on every progress tick (was the root cause of max-depth error)
+  const videoCurrentTimeRef = useRef(0);
+  const isPlayingRef = useRef(true);
 
   // Animations
   const loadingOpacity = useSharedValue(0);
@@ -623,6 +786,22 @@ const Player = ({route}: Props): React.JSX.Element => {
   const settingsOpacity = useSharedValue(0);
   const leftChatButtonTranslateX = useSharedValue(-100);
   const leftChatButtonOpacity = useSharedValue(0);
+  const [isFullScreen, setIsFullScreen] = useState(true);
+
+  // ── Episode panel state
+  const [showEpisodePanel, setShowEpisodePanel] = useState(false);
+
+  const toggleFullScreen = useCallback(() => {
+    if (isFullScreen) {
+      StatusBar.setHidden(false);
+      FullScreenChz.disable();
+      setIsFullScreen(false);
+    } else {
+      StatusBar.setHidden(true);
+      FullScreenChz.enable();
+      setIsFullScreen(true);
+    }
+  }, [isFullScreen]);
 
   const loadingContainerStyle = useAnimatedStyle(() => ({
     opacity: loadingOpacity.value,
@@ -649,6 +828,10 @@ const Player = ({route}: Props): React.JSX.Element => {
     opacity: leftChatButtonOpacity.value,
   }));
 
+  // ── FIX: Stable initial episode – don't run a useEffect that sets state from useMemo.
+  //         The useMemo already gives us the correct initial value; the useEffect caused
+  //         infinite loops because useMemo creates a new object reference every time any
+  //         dep changes, which immediately triggered setState again.
   const initialActiveEpisode = useMemo(() => {
     const fromList = route.params?.episodeList?.[route.params.linkIndex];
     if (fromList) return fromList;
@@ -673,12 +856,8 @@ const Player = ({route}: Props): React.JSX.Element => {
     route.params?.title,
   ]);
 
+  // ── FIX: Initialize once from useMemo; don't sync with a useEffect
   const [activeEpisode, setActiveEpisode] = useState(initialActiveEpisode);
-
-  // FIX: Removed 'activeEpisode' from dependencies so it doesn't reset when you click Next
-  useEffect(() => {
-    setActiveEpisode(initialActiveEpisode);
-  }, [initialActiveEpisode]);
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -745,11 +924,9 @@ const Player = ({route}: Props): React.JSX.Element => {
   const hasSkippedIntroRef = useRef(false);
   const lastActiveEpisodeRef = useRef(activeEpisode?.link);
 
-  // --- DEFINED VIDEO ID UPFRONT FOR STORAGE KEYS ---
   const videoId =
     route.params?.link || route.params?.video_id || activeEpisode?.link || '';
 
-  // --- WATCH TOGETHER STATE ---
   const [watchTogetherMode, setWatchTogetherModeState] = useState(
     getWatchTogetherMode(),
   );
@@ -766,21 +943,16 @@ const Player = ({route}: Props): React.JSX.Element => {
   const [chatMessage, setChatMessage] = useState('');
   const [isSyncingVideo, setIsSyncingVideo] = useState(false);
 
-  // --- ROOM ID MANAGEMENT (PERSISTENT & QUICK) ---
   const roomStorageKey = `room_session_${sanitizeFirebaseKey(videoId)}`;
 
-  // Initialize Room ID: Check Params (Link) -> Storage (History) -> Null
   const [roomId, setRoomId] = useState<string | null>(() => {
     if (route.params?.roomId) {
       return decodeURIComponent(route.params.roomId);
     }
-    // Check if we have a saved session for this specific video
     const savedRoomId = cacheStorage.getString(roomStorageKey);
     return savedRoomId || null;
   });
 
-  // --- SELF-HEALING ROOM ID GENERATION ---
-  // If watch mode is ON but RoomID is missing, generate it immediately.
   useEffect(() => {
     if (watchTogetherMode && !roomId && videoId) {
       const savedRoomId = cacheStorage.getString(roomStorageKey);
@@ -804,7 +976,87 @@ const Player = ({route}: Props): React.JSX.Element => {
     return '';
   }, [route.params?.syncLink, route.params?.leader]);
 
-  // --- SYNC HOOK INIT ---
+  const [videoDuration, setVideoDuration] = useState<number>(0);
+  // ── FIX: UI-only state for the Next Episode button; updated at low frequency
+  const [videoCurrentTime, setVideoCurrentTime] = useState<number>(0);
+
+  const lastCalculatedStart = useRef<number>(0);
+  const wasPlaying = useRef<boolean>(false);
+
+  useEffect(() => {
+    const savedToken = cacheStorage.getString('discord_token');
+    if (savedToken) {
+      DiscordRPC.connect(savedToken);
+    }
+    return () => {
+      DiscordRPC.disconnect();
+    };
+  }, [route.params?.id, activeEpisode?.id]);
+
+  useEffect(() => {
+    const mainTitle = route.params?.primaryTitle
+      ? decodeURIComponent(route.params.primaryTitle)
+      : route.params?.title || activeEpisode?.title || 'Unknown Video';
+
+    const subState =
+      activeEpisode?.title && activeEpisode.title !== mainTitle
+        ? activeEpisode.title
+        : 'Watching Now';
+
+    const rawPoster =
+      route.params?.poster ||
+      route.params?.episodeList?.poster ||
+      activeEpisode?.image ||
+      route.params?.image ||
+      route.params?.cover ||
+      undefined;
+
+    const providerName =
+      route.params?.providerValue ||
+      route.params?.providerName ||
+      route.params?.provider ||
+      undefined;
+
+    if (isPlaying && videoDuration > 0) {
+      const currentEpochMs = Date.now();
+      const startTime = Math.floor(currentEpochMs - videoCurrentTime * 1000);
+      const endTime = Math.floor(startTime + videoDuration * 1000);
+
+      if (
+        Math.abs(startTime - lastCalculatedStart.current) > 2000 ||
+        !wasPlaying.current
+      ) {
+        lastCalculatedStart.current = startTime;
+        wasPlaying.current = true;
+
+        DiscordRPC.updatePresence(
+          mainTitle,
+          subState,
+          startTime,
+          endTime,
+          rawPoster,
+          providerName,
+        );
+      }
+    } else if (!isPlaying) {
+      if (wasPlaying.current || lastCalculatedStart.current !== 0) {
+        wasPlaying.current = false;
+        lastCalculatedStart.current = 0;
+
+        DiscordRPC.updatePresence(
+          mainTitle,
+          `Paused - ${subState}`,
+          undefined,
+          undefined,
+          rawPoster,
+          providerName,
+        );
+      }
+    }
+    // ── FIX: removed videoCurrentTime from deps – we don't want Discord to spam
+    //         on every 500ms progress tick. Only trigger on play/pause events.
+  }, [isPlaying, activeEpisode, route.params, videoDuration]);
+
   const currentSyncKey = watchTogetherMode && roomId ? roomId : '';
 
   const {
@@ -831,14 +1083,11 @@ const Player = ({route}: Props): React.JSX.Element => {
   const setWatchTogetherMode = useCallback(
     (mode: boolean) => {
       if (mode) {
-        // Validation check
         if (!userNickname || !userPassword) {
           setShowNicknameModal(true);
           return;
         }
 
-        // --- FIXED LOGIC: GENERATE IMMEDIATELY BEFORE SETTING MODE ---
-        // This ensures the view has an ID to display immediately
         if (!roomId) {
           let idToUse = cacheStorage.getString(roomStorageKey);
           if (!idToUse) {
@@ -856,7 +1105,6 @@ const Player = ({route}: Props): React.JSX.Element => {
     [userNickname, userPassword, roomId, videoId, roomStorageKey],
   );
 
-  // --- AUTH HANDLER ---
   const handleSetIdentity = useCallback(
     async (
       nick: string,
@@ -882,7 +1130,6 @@ const Player = ({route}: Props): React.JSX.Element => {
         let authSuccess = false;
 
         if (userData && userData.password) {
-          // User exists, check password
           if (userData.password === pass.trim()) {
             authSuccess = true;
           } else {
@@ -892,7 +1139,6 @@ const Player = ({route}: Props): React.JSX.Element => {
             );
           }
         } else {
-          // Register new user
           await fetch(userRef, {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
@@ -912,10 +1158,8 @@ const Player = ({route}: Props): React.JSX.Element => {
           cacheStorage.setString(KEY_USER_PASSWORD, pass.trim());
           setShowNicknameModal(false);
 
-          // Apply joining logic
           if (isJoining && forcedRoomId) {
             setRoomId(forcedRoomId);
-            // Save for history if we joined a link
             cacheStorage.setString(roomStorageKey, forcedRoomId);
 
             setWatchTogetherModeState(true);
@@ -923,7 +1167,6 @@ const Player = ({route}: Props): React.JSX.Element => {
             setIsSyncingVideo(true);
             ToastAndroid.show('Joined Private Room!', ToastAndroid.SHORT);
           } else if (!isJoining && !roomId) {
-            // Started as leader, check storage or generate IMMEDIATELY
             let newId = cacheStorage.getString(roomStorageKey);
             if (!newId) {
               newId = `${sanitizeFirebaseKey(videoId)}_${generateRandomId()}`;
@@ -945,6 +1188,7 @@ const Player = ({route}: Props): React.JSX.Element => {
     [firebaseConfig, videoId, roomId, roomStorageKey],
   );
 
+  const isFastForwardingRef = useRef(false);
   const [isFastForwarding, setIsFastForwarding] = useState(false);
   const [fastForwardRate, setLocalFastForwardRateState] = useState(
     getFastForwardRate(),
@@ -965,6 +1209,10 @@ const Player = ({route}: Props): React.JSX.Element => {
     cacheStorage.setString(KEY_FF_RATE, String(rate));
   }, []);
 
+  useEffect(() => {
+    isFastForwardingRef.current = isFastForwarding;
+  }, [isFastForwarding]);
+
   const finalPlaybackRate = useMemo(() => {
     return isFastForwarding ? fastForwardRate : basePlaybackRate;
   }, [isFastForwarding, fastForwardRate, basePlaybackRate]);
@@ -984,6 +1232,7 @@ const Player = ({route}: Props): React.JSX.Element => {
         if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
         longPressTimerRef.current = setTimeout(() => {
           if (!isMovingRef.current) {
+            isFastForwardingRef.current = true;
             setIsFastForwarding(true);
             setToastMessage(`Fast Forward ${fastForwardRate.toFixed(1)}x`);
             setShowToast(true);
@@ -1016,13 +1265,15 @@ const Player = ({route}: Props): React.JSX.Element => {
           clearTimeout(longPressTimerRef.current);
           longPressTimerRef.current = null;
         }
-        if (isFastForwarding) {
+        if (isFastForwardingRef.current) {
           setIsFastForwarding(false);
+          isFastForwardingRef.current = false;
           setShowToast(false);
+          setToastMessage('');
         }
       }
     },
-    [isFastForwarding, setShowToast],
+    [setShowToast, setToastMessage],
   );
 
   const handleTouchEnd = useCallback(() => {
@@ -1030,14 +1281,16 @@ const Player = ({route}: Props): React.JSX.Element => {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
-    if (isFastForwarding) {
+    if (isFastForwardingRef.current) {
       setIsFastForwarding(false);
+      isFastForwardingRef.current = false;
       setShowToast(false);
+      setToastMessage('');
     }
     setTimeout(() => {
       isMovingRef.current = false;
     }, 50);
-  }, [isFastForwarding, setShowToast]);
+  }, [setShowToast, setToastMessage]);
 
   const {videoPositionRef, handleProgress: baseHandleProgress} =
     usePlayerProgress({
@@ -1052,54 +1305,54 @@ const Player = ({route}: Props): React.JSX.Element => {
   const handleProgress = useCallback(
     (data: any) => {
       baseHandleProgress(data);
+      // ── FIX: Update ref immediately (no re-render)
+      if (data && data.currentTime !== undefined) {
+        videoCurrentTimeRef.current = data.currentTime;
+      }
       const now = Date.now();
       if (
         watchTogetherMode &&
         isSessionLeader &&
         now - lastSyncSendRef.current > 10000
       ) {
-        sendTimeUpdate(data.currentTime, isPlaying);
+        sendTimeUpdate(data.currentTime, isPlayingRef.current);
         lastSyncSendRef.current = now;
       }
     },
-    [
-      baseHandleProgress,
-      watchTogetherMode,
-      isSessionLeader,
-      sendTimeUpdate,
-      isPlaying,
-    ],
+    [baseHandleProgress, watchTogetherMode, isSessionLeader, sendTimeUpdate],
   );
 
-  // --- INITIAL JOIN LOGIC (SYNC LINK) ---
+  // ── FIX: Throttled UI state updates – only every 2 seconds for the Next Episode
+  //         button. This prevents videoPlayerProps from recomputing every 500ms.
   useEffect(() => {
-    const paramsRoomId = route.params?.roomId
-      ? decodeURIComponent(route.params.roomId)
-      : null;
-    if (route.params?.syncLink && paramsRoomId) {
-      if (!userNickname || !userPassword) {
-        // If joining with link but no auth, show modal
-        setShowNicknameModal(true);
-      } else {
-        // Auto-join if credentials exist
-        setRoomId(paramsRoomId);
-        // Save joined room to history
-        cacheStorage.setString(roomStorageKey, paramsRoomId);
+    const id = setInterval(() => {
+      setVideoCurrentTime(videoCurrentTimeRef.current);
+    }, 2000);
+    return () => clearInterval(id);
+  }, []);
 
-        setWatchTogetherModeState(true);
-        setIsSessionLeader(false);
-        setIsSyncingVideo(true);
-        ToastAndroid.show('Joined Private Watch Party!', ToastAndroid.SHORT);
+  // ── Auto-skip uses ref (no state dep in effect)
+  useEffect(() => {
+    if (autoSkipIntro && !hasSkippedIntroRef.current) {
+      if (activeEpisode?.link !== lastActiveEpisodeRef.current) {
+        hasSkippedIntroRef.current = false;
+        lastActiveEpisodeRef.current = activeEpisode?.link;
+      }
+      const currentT = videoCurrentTimeRef.current;
+      if (currentT > 1 && currentT <= skipDuration) {
+        if (playerRef.current) {
+          playerRef.current.seek(skipDuration);
+          ToastAndroid.show(
+            `Skipping intro to ${skipDuration}s`,
+            ToastAndroid.SHORT,
+          );
+          hasSkippedIntroRef.current = true;
+        }
       }
     }
-  }, [
-    route.params?.syncLink,
-    route.params?.roomId,
-    userNickname,
-    userPassword,
-    roomStorageKey,
-  ]);
+  }, [videoCurrentTime, autoSkipIntro, skipDuration, activeEpisode?.link]);
 
+  // ── Sync follower
   useEffect(() => {
     if (
       watchTogetherMode &&
@@ -1108,8 +1361,9 @@ const Player = ({route}: Props): React.JSX.Element => {
       playerRef.current
     ) {
       if (isSyncingVideo) {
-        const localTime = videoPositionRef.current.position;
-        const timeDifference = Math.abs(localTime - remoteTime);
+        const timeDifference = Math.abs(
+          videoCurrentTimeRef.current - remoteTime,
+        );
 
         if (timeDifference > 1.5) {
           playerRef.current.seek(remoteTime);
@@ -1132,36 +1386,7 @@ const Player = ({route}: Props): React.JSX.Element => {
     remoteTime,
     remoteIsPlaying,
     isPlaying,
-    videoPositionRef.current.position,
     isSyncingVideo,
-  ]);
-
-  useEffect(() => {
-    if (autoSkipIntro && !hasSkippedIntroRef.current) {
-      const currentPositionSeconds = videoPositionRef.current.position;
-      if (activeEpisode?.link !== lastActiveEpisodeRef.current) {
-        hasSkippedIntroRef.current = false;
-        lastActiveEpisodeRef.current = activeEpisode?.link;
-      }
-      if (
-        currentPositionSeconds > 1 &&
-        currentPositionSeconds <= skipDuration
-      ) {
-        if (playerRef.current) {
-          playerRef.current.seek(skipDuration);
-          ToastAndroid.show(
-            `Skipping intro to ${skipDuration}s`,
-            ToastAndroid.SHORT,
-          );
-          hasSkippedIntroRef.current = true;
-        }
-      }
-    }
-  }, [
-    videoPositionRef.current.position,
-    autoSkipIntro,
-    skipDuration,
-    activeEpisode?.link,
   ]);
 
   const playbacks = useMemo(
@@ -1169,7 +1394,6 @@ const Player = ({route}: Props): React.JSX.Element => {
     [],
   );
 
-  // --- SHARE LINK GENERATION ---
   const contentInfoUrl = route.params?.infoUrl || '';
   const contentProviderValue = route.params?.providerValue || provider.value;
   const contentPrimaryTitle =
@@ -1181,7 +1405,6 @@ const Player = ({route}: Props): React.JSX.Element => {
   const urlSafeProvider = encodeURIComponent(contentProviderValue);
   const urlSafeRoomId = encodeURIComponent(roomId || '');
 
-  // Include roomId in share link to ensure privacy
   const shareLink = `vegaNext://watch/video_id=${videoId}&time=${currentTime}&syncLink=true&roomId=${urlSafeRoomId}&leader=${encodeURIComponent(
     userNickname,
   )}&infoUrl=${urlSafeInfoUrl}&providerValue=${urlSafeProvider}&primaryTitle=${urlSafeTitle}`;
@@ -1300,31 +1523,34 @@ const Player = ({route}: Props): React.JSX.Element => {
   );
 
   const handleRestorePIP = useCallback(() => {
-    setBasePlaybackRate(1.0);
+    isPipActiveRef.current = false;
+    StatusBar.setHidden(true);
     FullScreenChz.enable();
-    setShowPlayer(false);
-    setTimeout(() => {
-      setKeyForPlayer(prev => prev + 1);
-      setShowPlayer(true);
+
+    if (wasPlayingBeforePipRef.current) {
+      setIsPlaying(true);
       setTimeout(() => {
         playerRef?.current?.resume();
-        setIsPlaying(true);
-      }, 75);
-    }, 300);
-  }, [setBasePlaybackRate]);
+      }, 200);
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
       playerRef?.current?.pause();
+      isFastForwardingRef.current = false;
       if (unlockButtonTimerRef.current)
         clearTimeout(unlockButtonTimerRef.current);
       if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
     };
   }, [unlockButtonTimerRef]);
 
+  // ── FIX: Smooth navigation back – disable fullscreen before unmounting
   useEffect(() => {
     FullScreenChz.enable();
     const unsubscribe = navigation.addListener('beforeRemove', () => {
+      // Restore UI chrome before the info page appears
+      StatusBar.setHidden(false);
       FullScreenChz.disable();
       playerRef?.current?.pause();
     });
@@ -1333,22 +1559,48 @@ const Player = ({route}: Props): React.JSX.Element => {
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
+
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (
-        nextAppState.match(/inactive|background/) &&
+        (nextAppState === 'background' || nextAppState === 'inactive') &&
         playerRef.current &&
         !isPlayerLocked &&
-        !showSettings
+        !showSettings &&
+        !isPipActiveRef.current
       ) {
-        playerRef.current.enterPictureInPicture();
+        wasPlayingBeforePipRef.current = isPlaying;
+        isPipActiveRef.current = true;
+        try {
+          playerRef.current.enterPictureInPicture();
+        } catch (err) {
+          isPipActiveRef.current = false;
+          playerRef.current?.pause();
+          setIsPlaying(false);
+        }
+      }
+
+      if (nextAppState === 'active') {
+        isPipActiveRef.current = false;
+        StatusBar.setHidden(true);
+        FullScreenChz.enable();
+        setTimeout(() => {
+          if (wasPlayingBeforePipRef.current) {
+            playerRef?.current?.resume();
+            setIsPlaying(true);
+          }
+        }, 200);
       }
     };
+
     const subscription = AppState.addEventListener(
       'change',
       handleAppStateChange,
     );
-    return () => subscription.remove();
-  }, [isPlayerLocked, showSettings]);
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isPlayerLocked, showSettings, isPlaying]);
 
   useEffect(() => {
     setSelectedAudioTrackIndex(0);
@@ -1461,6 +1713,10 @@ const Player = ({route}: Props): React.JSX.Element => {
         ),
         -1,
       );
+    } else {
+      cancelAnimation(loadingRotation);
+      loadingOpacity.value = withTiming(0, {duration: 300});
+      loadingScale.value = withTiming(0.8, {duration: 300});
     }
   }, [streamLoading]);
 
@@ -1518,6 +1774,32 @@ const Player = ({route}: Props): React.JSX.Element => {
     settingsOpacity.value = withTiming(showSettings ? 1 : 0, {duration: 250});
   }, [showSettings]);
 
+  // ── FIX: Initial join logic – run only when syncLink/roomId params change
+  useEffect(() => {
+    const paramsRoomId = route.params?.roomId
+      ? decodeURIComponent(route.params.roomId)
+      : null;
+    if (route.params?.syncLink && paramsRoomId) {
+      if (!userNickname || !userPassword) {
+        setShowNicknameModal(true);
+      } else {
+        setRoomId(paramsRoomId);
+        cacheStorage.setString(roomStorageKey, paramsRoomId);
+
+        setWatchTogetherModeState(true);
+        setIsSessionLeader(false);
+        setIsSyncingVideo(true);
+        ToastAndroid.show('Joined Private Watch Party!', ToastAndroid.SHORT);
+      }
+    }
+  }, [
+    route.params?.syncLink,
+    route.params?.roomId,
+    userNickname,
+    userPassword,
+    roomStorageKey,
+  ]);
+
   const handleSyncVideo = useCallback(async () => {
     if (isSyncingVideo) {
       setIsSyncingVideo(false);
@@ -1551,16 +1833,28 @@ const Player = ({route}: Props): React.JSX.Element => {
     }
   }, [isSyncingVideo, snapToLeader, isPlaying, setIsPlaying]);
 
+  // ── FIX: videoPlayerProps does NOT depend on videoCurrentTime or isPlaying state.
+  //         Both are tracked via refs inside the callbacks. This prevents the player
+  //         from remounting/re-rendering on every progress tick or play-state change,
+  //         which was the second cause of "Maximum update depth exceeded".
   const videoPlayerProps = useMemo(
     () => ({
       disableGesture: isPlayerLocked || !enableSwipeGesture,
       doubleTapTime: 200,
       disableSeekButtons: isPlayerLocked || hideSeekButtons,
       showOnStart: !isPlayerLocked,
+      textTracks: externalSubs,
       source: {
-        textTracks: externalSubs,
         uri: selectedStream?.link || '',
-        bufferConfig: {backBufferDurationMs: 30000},
+        // ── FIX: Tuned buffer config – faster start, less aggressive pre-buffering
+        //         to reduce the initial "big buffering" pause at video start.
+        bufferConfig: {
+          minBufferMs: 5000, // Only keep 5s minimum (was 15s – too slow to start)
+          maxBufferMs: 30000, // Cap at 30s (was 60s – wasted memory)
+          bufferForPlaybackMs: 1500, // Start after 1.5s (was 2.5s – faster start)
+          bufferForPlaybackAfterRebufferMs: 3000, // 3s after stall
+          backBufferDurationMs: 10000, // 10s back buffer
+        },
         shouldCache: true,
         ...(selectedStream?.type === 'm3u8' && {type: 'm3u8'}),
         headers: selectedStream?.headers,
@@ -1572,11 +1866,19 @@ const Player = ({route}: Props): React.JSX.Element => {
           imageUri: route.params?.poster?.poster,
         },
       },
-      onProgress: handleProgress,
-      paused: !isPlaying,
+      onProgress: (data: any) => {
+        handleProgress(data);
+      },
+      // ── FIX: `paused` derived from ref snapshot at render time – stable prop
+      paused: !isPlayingRef.current,
       onLoad: (data: any) => {
+        if (data && data.duration) {
+          setVideoDuration(data.duration);
+        }
         if (initialSeekTime > 0) {
-          playerRef?.current?.seek(initialSeekTime);
+          setTimeout(() => {
+            playerRef?.current?.seek(initialSeekTime);
+          }, 100);
           if (route.params?.syncLink) {
             ToastAndroid.show(
               `Syncing playback to ${initialSeekTime}s`,
@@ -1589,10 +1891,9 @@ const Player = ({route}: Props): React.JSX.Element => {
             );
           }
         }
-        if (isPlaying) {
+        if (isPlayingRef.current) {
           playerRef?.current?.resume();
         }
-        setBasePlaybackRate(1.0);
       },
       onRestoreUserInterfaceForPictureInPicture: handleRestorePIP,
       videoRef: playerRef,
@@ -1627,7 +1928,7 @@ const Player = ({route}: Props): React.JSX.Element => {
       disableFullscreen: true,
       disableVolume: true,
       showHours: true,
-      progressUpdateInterval: 1000,
+      progressUpdateInterval: 500,
       showNotificationControls: showMediaControls,
       onError: handleVideoError,
       resizeMode,
@@ -1643,9 +1944,13 @@ const Player = ({route}: Props): React.JSX.Element => {
       hideAllControlls: isPlayerLocked && !isSyncingVideo,
       onPlaybackStateChanged: (e: any) => {
         const playing = e.isPlaying;
+        // Update ref first (no re-render)
+        isPlayingRef.current = playing;
+        // Update state for UI elements that need it
         setIsPlaying(playing);
+        wasPlayingBeforePipRef.current = playing;
         if (watchTogetherMode && isSessionLeader) {
-          sendTimeUpdate(videoPositionRef.current.position, playing);
+          sendTimeUpdate(videoCurrentTimeRef.current, playing);
         }
       },
     }),
@@ -1660,7 +1965,6 @@ const Player = ({route}: Props): React.JSX.Element => {
       handleProgress,
       initialSeekTime,
       finalPlaybackRate,
-      setBasePlaybackRate,
       primary,
       navigation,
       setShowControls,
@@ -1674,12 +1978,11 @@ const Player = ({route}: Props): React.JSX.Element => {
       processVideoTracks,
       handleRestorePIP,
       showChatOverlay,
-      isPlaying,
       watchTogetherMode,
       isSessionLeader,
       sendTimeUpdate,
-      videoPositionRef,
       isSyncingVideo,
+      setVideoDuration,
     ],
   );
 
@@ -1695,7 +1998,11 @@ const Player = ({route}: Props): React.JSX.Element => {
       <SafeAreaView
         edges={{right: 'off', top: 'off', left: 'off', bottom: 'off'}}
         className="bg-black flex-1 justify-center items-center">
-        <StatusBar translucent={true} hidden={true} />
+        <StatusBar
+          hidden={true}
+          translucent={true}
+          backgroundColor="transparent"
+        />
         <OrientationLocker orientation={LANDSCAPE} />
         <TouchableNativeFeedback
           background={TouchableNativeFeedback.Ripple(
@@ -1720,7 +2027,11 @@ const Player = ({route}: Props): React.JSX.Element => {
   if (streamError) {
     return (
       <SafeAreaView className="bg-black flex-1 justify-center items-center">
-        <StatusBar translucent={true} hidden={true} />
+        <StatusBar
+          hidden={true}
+          translucent={true}
+          backgroundColor="transparent"
+        />
         <OrientationLocker orientation={LANDSCAPE} />
         <Text className="text-red-500 text-lg text-center mb-4">
           Failed to load stream. Please try again.
@@ -1737,7 +2048,11 @@ const Player = ({route}: Props): React.JSX.Element => {
   if (!activeEpisode?.link) {
     return (
       <SafeAreaView className="bg-black flex-1 justify-center items-center">
-        <StatusBar translucent={true} hidden={true} />
+        <StatusBar
+          hidden={true}
+          translucent={true}
+          backgroundColor="transparent"
+        />
         <OrientationLocker orientation={LANDSCAPE} />
         <Text className="text-red-500 text-lg text-center mb-4">
           Critical Error: Video link is missing. Cannot play content.
@@ -1755,7 +2070,11 @@ const Player = ({route}: Props): React.JSX.Element => {
     <SafeAreaView
       edges={{right: 'off', top: 'off', left: 'off', bottom: 'off'}}
       className="bg-black flex-1 relative">
-      <StatusBar translucent={true} hidden={true} />
+      <StatusBar
+        hidden={isFullScreen}
+        translucent={true}
+        backgroundColor="transparent"
+      />
       <OrientationLocker orientation={LANDSCAPE} />
 
       <View
@@ -1793,7 +2112,7 @@ const Player = ({route}: Props): React.JSX.Element => {
           <TouchableOpacity
             activeOpacity={1}
             onPress={() => setShowChatOverlay(false)}
-            className="absolute top-0 left-0 right-0 bottom-0 z-49 bg-transparent"
+            className="absolute top-0 left-0 right-0 bottom-0 bg-transparent"
             style={{zIndex: 49}}
           />
         )}
@@ -1845,7 +2164,7 @@ const Player = ({route}: Props): React.JSX.Element => {
                 </Text>
                 <TouchableOpacity
                   onPress={() => {
-                    Clipboard.setString(shareLink);
+                    setClipboard(shareLink);
                     ToastAndroid.show('Copied share link!', ToastAndroid.SHORT);
                   }}
                   className="p-1 bg-blue-500 rounded">
@@ -1859,7 +2178,10 @@ const Player = ({route}: Props): React.JSX.Element => {
 
             <ScrollView
               className="flex-1 mb-2"
-              ref={ref => ref?.scrollToEnd({animated: true})}>
+              ref={chatScrollRef}
+              onContentSizeChange={() =>
+                chatScrollRef.current?.scrollToEnd({animated: true})
+              }>
               {chatLog.map((msg, index) => (
                 <Text
                   key={index}
@@ -1902,6 +2224,15 @@ const Player = ({route}: Props): React.JSX.Element => {
                 name="settings"
                 color={'hsl(0, 0%, 70%)'}
                 size={24}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={toggleFullScreen}
+              style={{padding: 8, marginLeft: 8}}>
+              <MaterialIcons
+                name={isFullScreen ? 'fullscreen-exit' : 'fullscreen'}
+                size={28}
+                color="white"
               />
             </TouchableOpacity>
 
@@ -2002,7 +2333,19 @@ const Player = ({route}: Props): React.JSX.Element => {
               <TouchableOpacity
                 className="flex-row gap-1 items-center opacity-60"
                 onPress={() => {
-                  playerRef?.current?.enterPictureInPicture();
+                  if (playerRef?.current) {
+                    wasPlayingBeforePipRef.current = isPlaying;
+                    isPipActiveRef.current = true;
+                    try {
+                      playerRef.current.enterPictureInPicture();
+                    } catch (_err) {
+                      isPipActiveRef.current = false;
+                      ToastAndroid.show(
+                        'PiP not supported on this device',
+                        ToastAndroid.SHORT,
+                      );
+                    }
+                  }
                 }}>
                 <MaterialIcons
                   name="picture-in-picture"
@@ -2045,11 +2388,32 @@ const Player = ({route}: Props): React.JSX.Element => {
               </Text>
             </TouchableOpacity>
 
-            {route.params?.episodeList?.indexOf(activeEpisode) <
-              route.params?.episodeList?.length - 1 &&
-              videoPositionRef.current.position /
-                videoPositionRef.current.duration >
-                0.7 && (
+            {/* ── NEW: Episodes button – shows episode panel without closing player */}
+            {route.params?.episodeList &&
+              route.params.episodeList.length > 1 && (
+                <TouchableOpacity
+                  className="flex-row gap-1 items-center opacity-60"
+                  onPress={() => setShowEpisodePanel(true)}>
+                  <MaterialIcons
+                    name="queue-play-next"
+                    size={24}
+                    color="white"
+                  />
+                  <Text className="text-white text-xs">Episodes</Text>
+                </TouchableOpacity>
+              )}
+
+            {route.params?.episodeList &&
+              activeEpisode &&
+              route.params.episodeList.findIndex(
+                e => e.link === activeEpisode.link,
+              ) !== -1 &&
+              route.params.episodeList.findIndex(
+                e => e.link === activeEpisode.link,
+              ) <
+                route.params.episodeList.length - 1 &&
+              videoDuration > 0 &&
+              videoCurrentTime / videoDuration > 0.7 && (
                 <TouchableOpacity
                   className="flex-row items-center opacity-60"
                   onPress={handleNextEpisode}>
@@ -2060,6 +2424,20 @@ const Player = ({route}: Props): React.JSX.Element => {
           </Animated.View>
         )}
       </View>
+
+      {/* ── Episode Panel Overlay – slide in from right, player keeps playing */}
+      <EpisodePanelOverlay
+        visible={showEpisodePanel}
+        onClose={() => setShowEpisodePanel(false)}
+        episodeList={route.params?.episodeList || []}
+        activeEpisode={activeEpisode}
+        onSelectEpisode={episode => {
+          setActiveEpisode(episode);
+          hasSetInitialTracksRef.current = false;
+          hasSkippedIntroRef.current = false;
+        }}
+        primary={primary}
+      />
 
       <Animated.View
         style={[toastStyle]}
@@ -2366,7 +2744,6 @@ const Player = ({route}: Props): React.JSX.Element => {
                 <TouchableOpacity
                   className="flex-row gap-2 items-center rounded-md my-1 overflow-hidden ml-2"
                   onPress={async () => {
-                    // FIX: Prevent video from keeping playing in background
                     const wasPlaying = isPlaying;
                     if (wasPlaying) {
                       setIsPlaying(false);

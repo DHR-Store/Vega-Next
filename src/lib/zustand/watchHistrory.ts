@@ -1,34 +1,43 @@
 import {create} from 'zustand';
 import {WatchHistoryItem, watchHistoryStorage} from '../storage';
+import {cloudSyncService} from '../services/CloudSyncService';
+import {storageService} from '../storage/StorageService';
 
 export interface History {
   history: WatchHistoryItem[];
   addItem: (item: WatchHistoryItem) => void;
-  updatePlaybackInfo: (
-    link: string,
-    playbackInfo: Partial<WatchHistoryItem>,
-  ) => void;
+  updatePlaybackInfo: (link: string, playbackInfo: Partial<WatchHistoryItem>) => void;
   clearHistory: () => void;
   updateItemWithInfo: (link: string, infoData: any) => void;
   removeItem: (item: WatchHistoryItem) => void;
+  rehydrate: () => void;
 }
 
-// Helper function to convert between our storage format and zustand format
-const convertStorageToZustand = (items: any[]): WatchHistoryItem[] => {
-  return items.map(item => ({
+const convertStorageToZustand = (items: any[]): WatchHistoryItem[] =>
+  items.map(item => ({
     ...item,
     lastPlayed: item.timestamp,
-    currentTime: item.progress || 0,
+    currentTime: item.progress ?? 0,
   }));
-};
+
+function syncHistory(): void {
+  const userId = storageService.getCurrentUserId();
+  if (userId) {
+    cloudSyncService
+      .pushCategory(userId, 'watchHistory')
+      .catch(e => console.warn('[watchHistoryStore] cloud push failed:', e));
+  }
+}
 
 const useWatchHistoryStore = create<History>(set => ({
-  // Initialize from our storage service
   history: convertStorageToZustand(watchHistoryStorage.getWatchHistory()),
+
+  rehydrate: () => {
+    set({history: convertStorageToZustand(watchHistoryStorage.getWatchHistory())});
+  },
 
   addItem: item => {
     try {
-      // Format item for our storage service
       const storageItem: WatchHistoryItem = {
         id: item.link || item.title,
         title: item.title,
@@ -41,16 +50,11 @@ const useWatchHistoryStore = create<History>(set => ({
         episodeTitle: item.episodeTitle,
         cachedInfoData: item.cachedInfoData,
       };
-
-      // Add to storage
       watchHistoryStorage.addToWatchHistory(storageItem);
-
-      // Update UI state
-      set({
-        history: convertStorageToZustand(watchHistoryStorage.getWatchHistory()),
-      });
+      set({history: convertStorageToZustand(watchHistoryStorage.getWatchHistory())});
+      syncHistory();
     } catch (error) {
-      console.error('❌ Error:', error);
+      console.error('❌ [watchHistoryStore] addItem error:', error);
     }
   },
 
@@ -58,57 +62,47 @@ const useWatchHistoryStore = create<History>(set => ({
     try {
       const history = watchHistoryStorage.getWatchHistory();
       const existingItem = history.find(item => item.link === link);
-
       if (existingItem) {
-        const updatedItem = {
+        watchHistoryStorage.addToWatchHistory({
           ...existingItem,
           progress: playbackInfo.currentTime,
-          duration: playbackInfo.duration || existingItem.duration,
+          duration: playbackInfo.duration ?? existingItem.duration,
           timestamp: Date.now(),
-        };
-
-        watchHistoryStorage.addToWatchHistory(updatedItem);
+        });
       }
-
-      set({
-        history: convertStorageToZustand(watchHistoryStorage.getWatchHistory()),
-      });
+      set({history: convertStorageToZustand(watchHistoryStorage.getWatchHistory())});
+      syncHistory();
     } catch (error) {
-      console.error('❌ Error updating watch history:', error);
+      console.error('❌ [watchHistoryStore] updatePlaybackInfo error:', error);
     }
   },
 
   removeItem: item => {
     watchHistoryStorage.removeFromWatchHistory(item.link);
-    set({
-      history: convertStorageToZustand(watchHistoryStorage.getWatchHistory()),
-    });
+    set({history: convertStorageToZustand(watchHistoryStorage.getWatchHistory())});
+    syncHistory();
   },
 
   clearHistory: () => {
     watchHistoryStorage.clearWatchHistory();
     set({history: []});
+    syncHistory();
   },
 
   updateItemWithInfo: (link, infoData) => {
     try {
       const history = watchHistoryStorage.getWatchHistory();
       const existingItem = history.find(item => item.link === link);
-
       if (existingItem) {
-        const updatedItem = {
+        watchHistoryStorage.addToWatchHistory({
           ...existingItem,
           cachedInfoData: infoData,
-        };
-
-        watchHistoryStorage.addToWatchHistory(updatedItem);
+        });
       }
-
-      set({
-        history: convertStorageToZustand(watchHistoryStorage.getWatchHistory()),
-      });
+      set({history: convertStorageToZustand(watchHistoryStorage.getWatchHistory())});
+      syncHistory();
     } catch (error) {
-      console.error('❌ Error caching info data:', error);
+      console.error('❌ [watchHistoryStore] updateItemWithInfo error:', error);
     }
   },
 }));

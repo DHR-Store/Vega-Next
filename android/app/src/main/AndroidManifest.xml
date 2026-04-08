@@ -4,6 +4,7 @@
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
   <uses-permission android:name="android.permission.WRITE_SETTINGS"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
@@ -11,6 +12,7 @@
   <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
   <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
   <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+  
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -25,6 +27,7 @@
       <data android:scheme="vlc"/>
     </intent>
   </queries>
+
   <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:requestLegacyExternalStorage="true">
     <meta-data android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME" android:value="com.reactnative.googlecast.GoogleCastOptionsProvider"/>
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="true"/>
@@ -33,17 +36,26 @@
     <meta-data android:name="com.onesignal.NotificationIcon" android:resource="@drawable/ic_stat_onesignal_default"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://u.expo.dev/671c42c5-ed3c-4e8a-adca-94c20c08055f"/>
     <meta-data android:name="expo.modules.updates.EXPO_RUNTIME_VERSION" android:value="@string/expo_runtime_version"/>
+    
     <service android:name="com.brentvatne.exoplayer.VideoPlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback">
       <intent-filter>
         <action android:name="androidx.media3.session.MediaSessionService"/>
       </intent-filter>
     </service>
+    
     <service android:name="com.onesignal.NotificationExtenderService" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false"/>
+    
     <service android:name="com.google.firebase.messaging.FirebaseMessagingService" android:exported="true" tools:replace="android:exported">
       <intent-filter>
         <action android:name="com.google.firebase.MESSAGING_EVENT"/>
       </intent-filter>
     </service>
+
+    <service
+      android:name="app.notifee.core.ForegroundService"
+      android:foregroundServiceType="dataSync"
+      android:exported="false"/>
+
     <receiver android:name="com.onesignal.GcmBroadcastReceiver" android:permission="com.google.android.c2dm.permission.SEND" android:exported="true">
       <intent-filter>
         <action android:name="com.google.firebase.MESSAGING_EVENT"/>
@@ -51,6 +63,7 @@
         <category android:name="${applicationId}"/>
       </intent-filter>
     </receiver>
+    
     <activity android:name=".MainActivity" android:label="@string/app_name" android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:exported="true" android:theme="@style/BootTheme" android:supportsPictureInPicture="true">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
@@ -63,6 +76,7 @@
         <data android:scheme="com.vega.next"/>
       </intent-filter>
     </activity>
+    
     <activity android:name="com.reactnative.googlecast.RNGCExpandedControllerActivity"/>
   </application>
 </manifest>

@@ -303,9 +303,14 @@ const SeasonList: React.FC<SeasonListProps> = ({
         type: type,
         primaryTitle: primaryTitle,
         secondaryTitle: seasonTitle,
-        poster: poster,
         providerValue: providerValue,
         infoUrl: routeParams.link,
+
+        // --- FIXED DISCORD DATA ---
+        // Accurately extracts the string URL from the poster object
+        poster: poster?.poster || routeParams?.poster || undefined,
+        // Passes the provider value correctly for the Discord subtitle
+        providerName: providerValue,
       });
     },
     [

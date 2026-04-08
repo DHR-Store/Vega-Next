@@ -23,7 +23,7 @@ import {
 import {HomeStackParamList, TabStackParamList} from '../../App';
 import LinearGradient from 'react-native-linear-gradient';
 import SeasonList from '../../components/SeasonList';
-import CastInfo from '../../components/CastInfo'; // ADDED NEW IMPORT
+import CastInfo from '../../components/CastInfo';
 import {Skeleton} from 'moti/skeleton';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {settingsStorage, watchListStorage} from '../../lib/storage';
@@ -31,14 +31,15 @@ import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useContentStore from '../../lib/zustand/contentStore';
 import {MaterialCommunityIcons} from '@expo/vector-icons';
 import useThemeStore from '../../lib/zustand/themeStore';
-import {useNavigation} from '@react-navigation/native';
+// FIX 1: Import useIsFocused to detect when screen loses/gains focus
+import {useNavigation, useIsFocused} from '@react-navigation/native';
 import useWatchListStore from '../../lib/zustand/watchListStore';
 import {useContentDetails} from '../../lib/hooks/useContentInfo';
 import {QueryErrorBoundary} from '../../components/ErrorBoundary';
 import YoutubePlayer from 'react-native-youtube-iframe';
 
 // --- CONFIGURATION ---
-const TMDB_API_KEY = '9d2bff12ed955c7f1f74b83187f188ae';
+const TMDB_API_KEY = 'YOUR_TMDB_API_KEY';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 // --- UTILITIES ---
@@ -47,7 +48,7 @@ const getTmdbTrailer = async (
   title: string,
   type: string = 'movie',
   year?: string,
-  imdbId?: string, // Added IMDB ID support
+  imdbId?: string,
 ): Promise<string | null> => {
   if (!TMDB_API_KEY) {
     console.warn('TMDB API Key missing. Trailer fallback disabled.');
@@ -80,7 +81,6 @@ const getTmdbTrailer = async (
       const query = encodeURIComponent(title);
       let yearParam = '';
       if (year) {
-        // Use correct parameter for TV shows vs Movies
         yearParam =
           searchType === 'movie'
             ? `&year=${year}`
@@ -97,10 +97,8 @@ const getTmdbTrailer = async (
     }
 
     // --- STRATEGY 3: SEARCH BY TITLE ONLY (Fallback) ---
-    // If strict search failed (e.g. wrong year), try loose search
     if (!tmdbId && year) {
       const query = encodeURIComponent(title);
-      // Omit the year parameter for a broader search
       const looseUrl = `${TMDB_BASE_URL}/search/${searchType}?api_key=${TMDB_API_KEY}&query=${query}`;
       const looseRes = await fetch(looseUrl);
       const looseData = await looseRes.json();
@@ -110,7 +108,6 @@ const getTmdbTrailer = async (
       }
     }
 
-    // If still no ID found, return null
     if (!tmdbId) return null;
 
     // --- FETCH VIDEOS ---
@@ -119,12 +116,10 @@ const getTmdbTrailer = async (
     const videoData = await videoRes.json();
 
     if (videoData.results && videoData.results.length > 0) {
-      // Prioritize official Trailers from YouTube
       const trailer = videoData.results.find(
         (v: any) =>
           v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'),
       );
-      // Fallback to the first available video if no specific trailer found
       return trailer ? trailer.key : videoData.results[0].key;
     }
     return null;
@@ -137,6 +132,7 @@ const getTmdbTrailer = async (
 // --- COMPONENTS ---
 
 // 3D Flip Header Component
+// FIX 2: Accept `isFocused` and `hasAutoFlippedRef` props to prevent re-init on return
 const FlipHeader = ({
   posterImage,
   trailerId,
@@ -147,6 +143,8 @@ const FlipHeader = ({
   logoError,
   onInteract,
   isFetchingTrailer,
+  isFocused, // NEW: screen focus state
+  hasAutoFlippedRef, // NEW: lifted ref to survive re-renders
 }: any) => {
   const [showVideo, setShowVideo] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -154,11 +152,18 @@ const FlipHeader = ({
 
   const animatedValue = useRef(new Animated.Value(0)).current;
   const {width} = useWindowDimensions();
-  const hasAutoFlipped = useRef(false);
 
   // Calculate correct 16:9 height based on screen width
   const videoHeight = width * (9 / 16);
   const headerHeight = 256;
+
+  // FIX 3: Pause video when screen loses focus (user navigates to Player)
+  // This prevents the YouTube WebView from being in a broken state on return
+  useEffect(() => {
+    if (!isFocused) {
+      setIsPlaying(false);
+    }
+  }, [isFocused]);
 
   // Animation to show Video (Back Side)
   const flipToVideo = useCallback(() => {
@@ -187,25 +192,24 @@ const FlipHeader = ({
     }).start();
   }, [animatedValue]);
 
-  // Auto-flip logic
+  // FIX 4: Use the lifted `hasAutoFlippedRef` so auto-flip does NOT re-trigger
+  // when returning from Player (even if FlipHeader re-renders)
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (trailerId && !hasAutoFlipped.current && !showVideo) {
+    if (trailerId && !hasAutoFlippedRef.current && !showVideo && isFocused) {
       timer = setTimeout(() => {
         flipToVideo();
-        hasAutoFlipped.current = true;
+        hasAutoFlippedRef.current = true;
       }, 3000);
     }
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [trailerId, showVideo, flipToVideo]);
+  }, [trailerId, showVideo, flipToVideo, isFocused, hasAutoFlippedRef]);
 
   const onStateChange = useCallback((state: string) => {
     if (state === 'ended') {
       setIsPlaying(false);
-      // Optional: Auto-flip back to poster when ended
-      // flipToPoster();
     }
   }, []);
 
@@ -301,10 +305,7 @@ const FlipHeader = ({
 
         {/* --- DOTS FOR FRONT (Poster Active) --- */}
         <View className="absolute bottom-2 w-full flex-row justify-center items-center gap-2 z-50">
-          {/* Active Dot (Poster) */}
           <View className="w-2 h-2 rounded-full bg-white scale-125" />
-
-          {/* Inactive Dot (Go to Video) */}
           {trailerId ? (
             <TouchableOpacity
               onPress={flipToVideo}
@@ -335,7 +336,6 @@ const FlipHeader = ({
               justifyContent: 'center',
               alignItems: 'center',
             }}>
-            {/* Video Player Container - Full Fixed Width/Height Centered */}
             <View
               style={{
                 height: videoHeight,
@@ -346,13 +346,14 @@ const FlipHeader = ({
               <YoutubePlayer
                 height={videoHeight}
                 width={width}
-                play={playerReady && isPlaying}
+                // FIX 5: Only play when screen is focused AND player is ready AND isPlaying
+                play={playerReady && isPlaying && isFocused}
                 videoId={trailerId}
                 mute={true}
                 onReady={() => setPlayerReady(true)}
                 onChangeState={onStateChange}
                 initialPlayerParams={{
-                  controls: true, // ENABLED: Shows Progress Bar and Controls
+                  controls: true,
                   modestbranding: true,
                   loop: false,
                   rel: false,
@@ -364,8 +365,6 @@ const FlipHeader = ({
               />
             </View>
 
-            {/* --- SMALL BELOW OVERLAY (Dots) --- */}
-            {/* Click the first dot to return to poster */}
             <View className="absolute bottom-2 w-full flex-row justify-center items-center gap-2 z-50">
               <TouchableOpacity
                 onPress={flipToPoster}
@@ -382,7 +381,6 @@ const FlipHeader = ({
             ) : (
               <View className="items-center gap-2">
                 <Text className="text-white/50 text-xs">No Trailer</Text>
-                {/* Return Dot */}
                 <TouchableOpacity onPress={flipToPoster} className="p-2">
                   <View className="w-2 h-2 rounded-full bg-white/30" />
                 </TouchableOpacity>
@@ -484,6 +482,9 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
   const {addItem, removeItem} = useWatchListStore(state => state);
   const {provider} = useContentStore(state => state);
 
+  // FIX 6: Track screen focus so FlipHeader can pause/resume intelligently
+  const isFocused = useIsFocused();
+
   const {
     info,
     meta,
@@ -494,6 +495,25 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
     route.params.link,
     route.params.provider || provider.value,
   );
+
+  // FIX 7: Cache last valid info/meta so skeleton NEVER flashes on refetch.
+  // When hook refetches (e.g. on focus), we show cached content instead of skeleton.
+  const cachedInfo = useRef<any>(null);
+  const cachedMeta = useRef<any>(null);
+
+  useEffect(() => {
+    if (info) cachedInfo.current = info;
+  }, [info]);
+
+  useEffect(() => {
+    if (meta) cachedMeta.current = meta;
+  }, [meta]);
+
+  // Use cached data when new data is loading (avoids skeleton flash on return)
+  const stableInfo = info ?? cachedInfo.current;
+  const stableMeta = meta ?? cachedMeta.current;
+  // Only show loading skeleton on TRUE first load (no cached data yet)
+  const isFirstLoad = infoLoading && !cachedInfo.current;
 
   const [threeDotsMenuOpen, setThreeDotsMenuOpen] = useState(false);
   const [readMore, setReadMore] = useState(false);
@@ -513,6 +533,10 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
 
   const [ytVideoId, setYtVideoId] = useState<string | null>(null);
   const [isFetchingTrailer, setIsFetchingTrailer] = useState(false);
+
+  // FIX 8: Lift hasAutoFlipped ref to Info so it persists across FlipHeader re-renders
+  // This prevents the auto-flip animation from re-triggering when returning from Player
+  const hasAutoFlippedRef = useRef(false);
 
   const threeDotsRef = useRef<any>();
   const isMounted = useRef(true);
@@ -554,13 +578,13 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
       ignoreAndroidSystemSettings: false,
     });
     addItem({
-      title: meta?.name || info?.title,
-      poster: meta?.poster || route.params.poster || info?.image,
+      title: stableMeta?.name || stableInfo?.title,
+      poster: stableMeta?.poster || route.params.poster || stableInfo?.image,
       link: route.params.link,
       provider: route.params.provider || provider.value,
     });
     setInLibrary(true);
-  }, [meta, info, route.params, provider.value, addItem]);
+  }, [stableMeta, stableInfo, route.params, provider.value, addItem]);
 
   const removeLibrary = useCallback(() => {
     if (settingsStorage.isHapticFeedbackEnabled()) {
@@ -574,54 +598,58 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
   }, [route.params.link, removeItem]);
 
   const synopsis = useMemo(() => {
-    return meta?.description || info?.synopsis || 'No synopsis available';
-  }, [meta?.description, info?.synopsis]);
+    return (
+      stableMeta?.description || stableInfo?.synopsis || 'No synopsis available'
+    );
+  }, [stableMeta?.description, stableInfo?.synopsis]);
 
   const displayTitle = useMemo(() => {
-    return meta?.name || info?.title;
-  }, [meta?.name, info?.title]);
+    return stableMeta?.name || stableInfo?.title;
+  }, [stableMeta?.name, stableInfo?.title]);
 
   const posterImage = useMemo(() => {
     return (
-      meta?.poster ||
+      stableMeta?.poster ||
       route.params.poster ||
-      info?.image ||
+      stableInfo?.image ||
       'https://placehold.jp/24/363636/ffffff/500x500.png?text=Vega'
     );
-  }, [meta?.poster, route.params.poster, info?.image]);
+  }, [stableMeta?.poster, route.params.poster, stableInfo?.image]);
 
   const backgroundImage = useMemo(() => {
     return (
-      meta?.background ||
-      info?.image ||
+      stableMeta?.background ||
+      stableInfo?.image ||
       'https://placehold.jp/24/363636/ffffff/500x500.png?text=Vega'
     );
-  }, [meta?.background, info?.image]);
+  }, [stableMeta?.background, stableInfo?.image]);
 
   const filteredLinkList = useMemo(() => {
-    if (!info?.linkList) {
+    if (!stableInfo?.linkList) {
       return [];
     }
     const excludedQualities = settingsStorage.getExcludedQualities();
-    const filtered = info.linkList.filter(
+    const filtered = stableInfo.linkList.filter(
       (item: any) =>
         !item.quality || !excludedQualities.includes(item.quality as string),
     );
 
     const uniqueLinksMap = new Map();
-    filtered.forEach(item => {
+    filtered.forEach((item: any) => {
       if (item.link && !uniqueLinksMap.has(item.link)) {
         uniqueLinksMap.set(item.link, item);
       }
     });
 
     const filteredAndUnique = Array.from(uniqueLinksMap.values());
-    return filteredAndUnique.length > 0 ? filteredAndUnique : info.linkList;
-  }, [info?.linkList]);
+    return filteredAndUnique.length > 0
+      ? filteredAndUnique
+      : stableInfo.linkList;
+  }, [stableInfo?.linkList]);
 
   const castList = useMemo(() => {
-    return meta?.cast?.length! > 0 ? meta?.cast : info?.cast;
-  }, [meta?.cast, info?.cast]);
+    return stableMeta?.cast?.length! > 0 ? stableMeta?.cast : stableInfo?.cast;
+  }, [stableMeta?.cast, stableInfo?.cast]);
 
   const handleRefresh = useCallback(async () => {
     try {
@@ -649,34 +677,41 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
   }, [useExternalDownloader]);
 
   // --- TRAILER FETCHING LOGIC ---
+  // FIX 9: Guard with a fetched ref so trailer is NOT re-fetched every time
+  // screen regains focus (which was causing ytVideoId to reset and YouTube to rebuffer)
+  const trailerFetchedRef = useRef(false);
+
   useEffect(() => {
+    // Skip if already fetched once — prevents re-fetch on return from Player
+    if (trailerFetchedRef.current) return;
+
     const fetchTrailer = async () => {
-      // 1. Try to get trailer from Content Provider
-      const providerTrailer = meta?.trailers?.[0]?.source;
+      const providerTrailer = stableMeta?.trailers?.[0]?.source;
 
       if (providerTrailer) {
         if (isMounted.current) {
           setYtVideoId(providerTrailer);
+          trailerFetchedRef.current = true;
         }
         return;
       }
 
-      // 2. If no provider trailer, try TMDB Search (With the new fallback logic)
-      if (displayTitle && !infoLoading) {
+      if (displayTitle && !isFirstLoad) {
         if (isMounted.current) {
           setIsFetchingTrailer(true);
         }
 
         const videoId = await getTmdbTrailer(
           displayTitle,
-          info?.type, // 'movie' or 'series'
-          meta?.year,
-          meta?.imdbId || meta?.imdb_id, // Pass IMDB ID if available
+          stableInfo?.type,
+          stableMeta?.year,
+          stableMeta?.imdbId || stableMeta?.imdb_id,
         );
 
         if (isMounted.current) {
           setYtVideoId(videoId);
           setIsFetchingTrailer(false);
+          trailerFetchedRef.current = true;
         }
       }
     };
@@ -684,15 +719,16 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
     fetchTrailer();
   }, [
     displayTitle,
-    meta?.year,
-    meta?.trailers,
-    meta?.imdbId,
-    meta?.imdb_id,
-    infoLoading,
-    info?.type,
+    stableMeta?.year,
+    stableMeta?.trailers,
+    stableMeta?.imdbId,
+    stableMeta?.imdb_id,
+    isFirstLoad,
+    stableInfo?.type,
   ]);
 
-  if (error) {
+  if (error && !cachedInfo.current) {
+    // Only show error screen on first-load failure; on refetch fail, keep showing cached content
     return (
       <View className="h-full w-full bg-black justify-center items-center p-4">
         <StatusBar
@@ -722,22 +758,27 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
     );
   }
 
-  const renderContent = () => {
-    // Fallback loading state for skeleton
-    if (infoLoading || !info) {
+  // FIX 10: Memoize the entire rendered content.
+  // This is the CORE fix — without this, every re-render (including isFocused toggle)
+  // causes renderContent() to return a fresh JSX tree, making FlatList rebuild
+  // FlipHeader from scratch and rebuffer the YouTube WebView.
+  const memoizedHeaderContent = useMemo(() => {
+    // Show skeleton only on TRUE first load (no cached data)
+    if (isFirstLoad || !stableInfo) {
       return (
         <View>
           <FlipHeader
             posterImage={backgroundImage}
             trailerId={null}
             title={displayTitle}
-            meta={meta}
+            meta={stableMeta}
             infoLoading={true}
             setLogoError={setLogoError}
             displayTitle={displayTitle}
             logoError={logoError}
-            navigation={navigation}
             isFetchingTrailer={false}
+            isFocused={isFocused}
+            hasAutoFlippedRef={hasAutoFlippedRef}
           />
           <View className="gap-y-3 items-start mb-4 p-3 bg-black">
             <Skeleton show={true} colorMode="dark" height={30} width={80} />
@@ -764,11 +805,11 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
         providerValue={route.params.provider || provider.value}
         LinkList={filteredLinkList}
         poster={{
-          logo: meta?.logo,
+          logo: stableMeta?.logo,
           poster: posterImage,
           background: backgroundImage,
         }}
-        type={info?.type || 'series'}
+        type={stableInfo?.type || 'series'}
         metaTitle={displayTitle}
         routeParams={route.params}
       />
@@ -780,35 +821,36 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
           posterImage={backgroundImage}
           trailerId={ytVideoId}
           title={displayTitle}
-          meta={meta}
-          infoLoading={infoLoading}
+          meta={stableMeta}
+          infoLoading={false}
           setLogoError={setLogoError}
           displayTitle={displayTitle}
           logoError={logoError}
-          navigation={navigation}
           isFetchingTrailer={isFetchingTrailer}
+          isFocused={isFocused}
+          hasAutoFlippedRef={hasAutoFlippedRef}
         />
 
         <View className="p-4 bg-black">
           <View className="flex-row gap-x-3 gap-y-1 flex-wrap items-center mb-4">
-            {meta?.year && (
+            {stableMeta?.year && (
               <Text className="text-white text-lg bg-tertiary px-2 rounded-md">
-                {meta?.year}
+                {stableMeta?.year}
               </Text>
             )}
-            {meta?.runtime && (
+            {stableMeta?.runtime && (
               <Text className="text-white text-lg bg-tertiary px-2 rounded-md">
-                {meta?.runtime}
+                {stableMeta?.runtime}
               </Text>
             )}
-            {meta?.genres?.slice(0, 2).map((genre: string) => (
+            {stableMeta?.genres?.slice(0, 2).map((genre: string) => (
               <Text
                 key={genre}
                 className="text-white text-lg bg-tertiary px-2 rounded-md">
                 {genre}
               </Text>
             ))}
-            {info?.tags?.slice(0, 3)?.map((tag: string) => (
+            {stableInfo?.tags?.slice(0, 3)?.map((tag: string) => (
               <Text
                 key={tag}
                 className="text-white text-lg bg-tertiary px-2 rounded-md">
@@ -816,24 +858,24 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
               </Text>
             ))}
           </View>
-          {meta?.awards && (
+          {stableMeta?.awards && (
             <View className="mb-2 w-full flex-row items-baseline gap-2">
               <Text className="text-white text-sm font-semibold">Awards:</Text>
               <Text className="text-white text-xs px-1 bg-tertiary rounded-sm">
-                {meta?.awards?.length > 50
-                  ? meta?.awards.slice(0, 50) + '...'
-                  : meta?.awards}
+                {stableMeta?.awards?.length > 50
+                  ? stableMeta?.awards.slice(0, 50) + '...'
+                  : stableMeta?.awards}
               </Text>
             </View>
           )}
 
-          {/* --- ADDED CAST INFO COMPONENT --- */}
+          {/* --- CAST INFO COMPONENT --- */}
           {displayTitle && (
             <CastInfo
               title={displayTitle}
-              type={info?.type}
-              year={meta?.year}
-              imdbId={meta?.imdbId || meta?.imdb_id}
+              type={stableInfo?.type}
+              year={stableMeta?.year}
+              imdbId={stableMeta?.imdbId || stableMeta?.imdb_id}
               fallbackCast={castList}
             />
           )}
@@ -992,7 +1034,44 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
         <View className="p-4 bg-black">{seasonList}</View>
       </View>
     );
-  };
+  }, [
+    // FIX 11: Comprehensive, correct dependency list.
+    // When returning from Player, none of these change → memoized element is reused →
+    // FlipHeader keeps its internal state → YouTube WebView is NOT rebuilt → no buffering.
+    isFirstLoad,
+    stableInfo,
+    stableMeta,
+    backgroundImage,
+    posterImage,
+    displayTitle,
+    logoError,
+    ytVideoId,
+    isFetchingTrailer,
+    isFocused,
+    synopsis,
+    readMore,
+    inLibrary,
+    useExternalPlayer,
+    useExternalDownloader,
+    threeDotsMenuOpen,
+    menuPosition,
+    filteredLinkList,
+    castList,
+    primary,
+    route.params,
+    provider.value,
+    hasAutoFlippedRef,
+    navigation,
+    searchNavigation,
+    addLibrary,
+    removeLibrary,
+    openThreeDotsMenu,
+    handleToggleExternalPlayer,
+    handleToggleExternalDownloader,
+    setLogoError,
+    setReadMore,
+    setThreeDotsMenuOpen,
+  ]);
 
   return (
     <QueryErrorBoundary>
@@ -1008,7 +1087,7 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
             data={[]}
             keyExtractor={(_, i) => i.toString()}
             renderItem={() => <View />}
-            ListHeaderComponent={renderContent()}
+            ListHeaderComponent={memoizedHeaderContent}
             ListFooterComponent={<View className="h-16" />}
             showsHorizontalScrollIndicator={false}
             showsVerticalScrollIndicator={false}

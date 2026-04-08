@@ -1,5 +1,4 @@
-// App.tsx
-
+// App.tsx (full file – replace your existing App.tsx)
 import 'react-native-reanimated';
 import React, {useEffect, useState} from 'react';
 import OneSignal from 'react-native-onesignal';
@@ -10,10 +9,12 @@ import {
   Modal,
   TouchableOpacity,
   Linking,
-  Dimensions,
   LogBox,
   Platform,
   DeviceEventEmitter,
+  useWindowDimensions,
+  Image as RNImage,
+  AppState,
 } from 'react-native';
 import {MaterialIcons} from '@expo/vector-icons';
 
@@ -71,14 +72,20 @@ import useAppModeStore from './lib/zustand/appModeStore';
 import VegaTVSettingsScreen from './screens/tv/VegaTVSettingsScreen';
 import * as Application from 'expo-application';
 import Suggestion from './screens/Suggestion';
-import {MMKV} from './lib/Mmkv'; // IMPORT ADDED HERE
+import {MMKV} from './lib/Mmkv';
 import CastMovie from './screens/CastMovie';
 import Onboarding from './screens/Onboarding';
-
+import {useNavigationContainerRef} from '@react-navigation/native';
+import AI from './components/AI';
+import ChatHistory from './screens/ChatHistory';
+import AddExtension from './screens/AddExtension';
+import ProviderCheck from './screens/settings/ProviderCheck';
+import YTHome from './screens/yt/YTHome';
+import Login from './screens/Login';
+import {userSession, User} from './lib/services/login';
+import {downloadManager} from './lib/services/DownloadManager';
 enableScreens(true);
 enableFreeze(true);
-
-const isLargeScreen = Dimensions.get('window').width > 768;
 
 /* ----------------- Navigation Types ----------------- */
 export type HomeStackParamList = {
@@ -121,6 +128,13 @@ export type TVRootStackParamList = {
 
 export type RootStackParamList = {
   Onboarding: undefined;
+  Login: undefined;
+  // FIX: `MainStack` was missing from the type definition.
+  // Login.tsx calls `navigation.reset({ routes: [{ name: 'MainStack' }] })`
+  // and App.tsx registers `<Stack.Screen name="MainStack" ... />`, so this
+  // entry must exist to avoid TypeScript errors and incorrect navigation.
+  MainStack: undefined;
+  YTHome: undefined;
   TabStack: NavigatorScreenParams<TabStackParamList>;
   MusicRootStack: NavigatorScreenParams<MusicRootStackParamList>;
   TVRootStack: NavigatorScreenParams<TVRootStackParamList>;
@@ -131,17 +145,12 @@ export type RootStackParamList = {
     type: string;
     primaryTitle?: string;
     secondaryTitle?: string;
-    poster: {
-      logo?: string;
-      poster?: string;
-      background?: string;
-    };
+    poster: {logo?: string; poster?: string; background?: string};
     file?: string;
     providerValue?: string;
     infoUrl?: string;
   };
   WatchTrailer: {link?: string; videoId?: string};
-  // ADDED CASTMOVIE TO ROOT STACK
   CastMovie: {castId: number; castName: string};
 };
 
@@ -162,7 +171,6 @@ export type SearchStackParamList = {
   Info: {link: string; provider?: string; poster?: string};
   SearchResults: {filter: string; availableProviders?: string[]};
   Webview: {link: string};
-  // FIXED: Added Suggestion type which was missing
   Suggestion: undefined;
 };
 
@@ -190,6 +198,8 @@ export type SettingsStackParamList = {
   WatchHistoryStack: undefined;
   SubTitlesPreferences: undefined;
   Extensions: undefined;
+  AddExtension: undefined;
+  ProviderCheck: undefined;
 };
 
 export type TabStackParamList = {
@@ -214,7 +224,7 @@ const TVRootStack = createNativeStackNavigator<TVRootStackParamList>();
 const VegaTVStack = createNativeStackNavigator<VegaTVStackParamList>();
 
 /* ----------------- Custom TabBarButton ----------------- */
-function CustomTabBarButton(props) {
+function CustomTabBarButton(props: any) {
   return (
     <TouchableOpacity
       accessibilityRole="button"
@@ -269,10 +279,7 @@ function SearchStackScreen() {
       <SearchStack.Screen name="ScrollList" component={ScrollList} />
       <SearchStack.Screen name="GenreList" component={ScrollList} />
       <SearchStack.Screen name="Info" component={Info} />
-
-      {/* FIXED: Changed from Stack.Screen to SearchStack.Screen */}
       <SearchStack.Screen name="Suggestion" component={Suggestion} />
-
       <SearchStack.Screen name="SearchResults" component={SearchResults} />
       <SearchStack.Screen name="Webview" component={WebView} />
     </SearchStack.Navigator>
@@ -327,6 +334,8 @@ function SettingsStackScreen() {
       <SettingsStack.Screen name="Preferences" component={Preferences} />
       <SettingsStack.Screen name="Downloads" component={Downloads} />
       <SettingsStack.Screen name="Extensions" component={Extensions} />
+      <SettingsStack.Screen name="AddExtension" component={AddExtension} />
+      <SettingsStack.Screen name="ProviderCheck" component={ProviderCheck} />
       <SettingsStack.Screen
         name="WatchHistoryStack"
         component={WatchHistoryStackScreen}
@@ -349,8 +358,8 @@ function VegaMusicStackNavigator() {
         freezeOnBlur: true,
         contentStyle: {backgroundColor: 'transparent'},
       }}>
-      <VegaMusicStack.Screen name="VegaMusicHome" component={VegaMusicHome} />
-      <VegaMusicStack.Screen name="VegaSettings" component={VegaSettings} />
+      <VegaMusicStack.Screen name="VegaMusicHome" component={View} />
+      <VegaMusicStack.Screen name="VegaSettings" component={View} />
     </VegaMusicStack.Navigator>
   );
 }
@@ -378,23 +387,48 @@ function VegaTVStackNavigator() {
 /* ----------------- Tab stack ----------------- */
 function TabStackScreen() {
   const {primary} = useThemeStore(state => state);
-
-  // Initialize with current value directly from MMKV using the CORRECT KEY
-  // Note: key is 'showTabBarLables' (matching Preference.tsx)
+  const {width} = useWindowDimensions();
+  const isLargeScreen = width > 768;
   const [showTabBarLabels, setShowTabBarLabels] = useState(
-    MMKV.getBool('showTabBarLables') || false,
+    Boolean(MMKV.getBool('showTabBarLables')) || false,
   );
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
-  // Listen for changes from Preferences.tsx
   useEffect(() => {
+    // Function to fetch current user data
+    const updateSession = () => {
+      setCurrentUser(userSession.getCurrentUser());
+    };
+
+    // Initial fetch
+    updateSession();
+
+    // Listeners for live updates across the app
+    const loginSub = DeviceEventEmitter.addListener(
+      'userLoggedIn',
+      updateSession,
+    );
+    const logoutSub = DeviceEventEmitter.addListener(
+      'userLoggedOut',
+      updateSession,
+    );
+    const photoSub = DeviceEventEmitter.addListener(
+      'profilePhotoChanged',
+      updateSession,
+    );
+
     const subscription = DeviceEventEmitter.addListener(
       'changeTabBarLabel',
       newValue => {
-        setShowTabBarLabels(newValue);
+        setShowTabBarLabels(newValue === true || newValue === 'true');
       },
     );
+
     return () => {
       subscription.remove();
+      loginSub.remove();
+      logoutSub.remove();
+      photoSub.remove();
     };
   }, []);
 
@@ -411,15 +445,13 @@ function TabStackScreen() {
         freezeOnBlur: true,
         tabBarActiveTintColor: primary,
         tabBarInactiveTintColor: '#dadde3',
-        tabBarShowLabel: showTabBarLabels, // Reactive state
+        tabBarShowLabel: showTabBarLabels,
         tabBarStyle: !isLargeScreen
           ? {
               position: 'absolute',
               bottom: 0,
               left: 0,
               right: 0,
-              // FIX: Constant Height + No manual inset math
-              // INCREASED HEIGHT HERE: 70 if labels are on, 45 if off
               height: showTabBarLabels ? 70 : 45,
               backgroundColor: 'transparent',
               borderRadius: 0,
@@ -428,7 +460,6 @@ function TabStackScreen() {
               borderTopWidth: 0,
               paddingHorizontal: 0,
               paddingTop: 5,
-              // Added padding bottom to give text space
               paddingBottom: showTabBarLabels ? 5 : 0,
             }
           : {},
@@ -485,21 +516,49 @@ function TabStackScreen() {
         component={SettingsStackScreen}
         options={{
           title: 'Settings',
-          tabBarIcon: ({focused, color, size}) => (
-            <Animated.View style={{transform: [{scale: focused ? 1.1 : 1}]}}>
-              {focused ? (
-                <Ionicons name="settings" color={color} size={size} />
-              ) : (
-                <Ionicons name="settings-outline" color={color} size={size} />
-              )}
-            </Animated.View>
-          ),
+          tabBarIcon: ({focused, color, size}) => {
+            // FIXED: Check if user exists & has a photo
+            const customSize = size + 5;
+            const photoUri =
+              currentUser?.photo || userSession.getBestPhotoUri();
+
+            // SHOW AVATAR IF LOGGED IN (removed the !focused check)
+            if (photoUri) {
+              return (
+                <Animated.View
+                  style={{transform: [{scale: focused ? 1.1 : 1}]}}>
+                  <RNImage
+                    source={{uri: photoUri}}
+                    style={{
+                      width: customSize,
+                      height: customSize,
+                      borderRadius: size / 2,
+                      // Optional: Highlight border when focused
+                      borderWidth: focused ? 2 : 0,
+                      borderColor: focused ? primary : 'transparent',
+                    }}
+                  />
+                </Animated.View>
+              );
+            }
+
+            // FALLBACK: SHOW SETTINGS ICON IF NOT LOGGED IN
+            return (
+              <Animated.View style={{transform: [{scale: focused ? 1.1 : 1}]}}>
+                {focused ? (
+                  <Ionicons name="settings" color={color} size={size} />
+                ) : (
+                  <Ionicons name="settings-outline" color={color} size={size} />
+                )}
+              </Animated.View>
+            );
+          },
         }}
       />
     </Tab.Navigator>
   );
 }
-/* ----------------- Music/TV roots ----------------- */
+/* ----------------- Music / TV roots ----------------- */
 function MusicRootStackScreen() {
   return (
     <MusicRootStack.Navigator
@@ -533,62 +592,84 @@ function TVRootStackScreen() {
   );
 }
 
-// Notification permission modal component
-const NotificationPromptModal = ({isVisible, onClose, onAllow}) => {
-  return (
-    <Modal
-      animationType="fade"
-      transparent={true}
-      visible={isVisible}
-      onRequestClose={onClose}>
-      <View className="flex-1 justify-center items-center bg-black/50">
-        <View className="bg-[#1A1A1A] rounded-2xl w-80 p-6 items-center">
-          <MaterialIcons
-            name="notifications-active"
-            size={40}
-            color="#6B7280"
-          />
-          <Text className="text-white text-xl font-bold mt-4 text-center">
-            Allow Vega-Next to send you notifications?
-          </Text>
-          <View className="mt-6 w-full">
-            <TouchableOpacity
-              onPress={onAllow}
-              className="bg-[#262626] rounded-xl py-3 px-4 mb-2">
-              <Text className="text-white text-lg text-center font-semibold">
-                Allow
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={onClose}
-              className="bg-transparent rounded-xl py-3 px-4">
-              <Text className="text-gray-400 text-lg text-center font-semibold">
-                Don't allow
-              </Text>
-            </TouchableOpacity>
-          </View>
+/* ----------------- Notification modal ----------------- */
+const NotificationPromptModal = ({isVisible, onClose, onAllow}: any) => (
+  <Modal
+    animationType="fade"
+    transparent
+    visible={isVisible}
+    onRequestClose={onClose}>
+    <View className="flex-1 justify-center items-center bg-black/50">
+      <View className="bg-[#1A1A1A] rounded-2xl w-80 p-6 items-center">
+        <MaterialIcons name="notifications-active" size={40} color="#6B7280" />
+        <Text className="text-white text-xl font-bold mt-4 text-center">
+          Allow Vega-Next to send you notifications?
+        </Text>
+        <View className="mt-6 w-full">
+          <TouchableOpacity
+            onPress={onAllow}
+            className="bg-[#262626] rounded-xl py-3 px-4 mb-2">
+            <Text className="text-white text-lg text-center font-semibold">
+              Allow
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onClose}
+            className="bg-transparent rounded-xl py-3 px-4">
+            <Text className="text-gray-400 text-lg text-center font-semibold">
+              Don't allow
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
-    </Modal>
-  );
-};
+    </View>
+  </Modal>
+);
 
-/* ----------------- Main App Component (with OneSignal) ----------------- */
+/* ----------------- Main App Component ----------------- */
 const App = () => {
   LogBox.ignoreLogs([
     'You have passed a style to FlashList',
     'new NativeEventEmitter()',
   ]);
 
-  // theme & app mode hooks (top-level, stable order)
   const {primary} = useThemeStore(state => state);
   const {appMode} = useAppModeStore(state => state);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const navigationRef = useNavigationContainerRef();
+  const [currentRouteName, setCurrentRouteName] = useState<string>('');
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null); // null = still checking
 
-  // system UI
   SystemUI.setBackgroundColorAsync('black');
 
-  // Notification Permission Logic
+  // Check login status on mount (synchronous — userSession.loadSession() runs
+  // in the constructor, so isLoggedIn() is reliable immediately).
+  useEffect(() => {
+    setIsLoggedIn(userSession.isLoggedIn());
+  }, []);
+
+  // ─── FIX 1: Reset stale downloads on every app launch ───────────────────────
+  // When app is killed mid-download, MMKV still stores status='downloading'.
+  // On restart nothing is actually running, so flip them to 'paused' so
+  // the user can see which ones need to be resumed.
+  useEffect(() => {
+    downloadManager.resetStaleDownloads();
+  }, []);
+
+  // ─── FIX 2: Sync download state when app comes back to foreground ────────────
+  // The Notifee Foreground Service may update download progress while the
+  // app UI is backgrounded. When user opens app again, reload from MMKV
+  // so the Downloads screen shows correct up-to-date state.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') {
+        downloadManager.refreshFromStorage();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
+  // Notification permission
   useEffect(() => {
     const checkNotificationPermission = async () => {
       const status = await check(PERMISSIONS.ANDROID.POST_NOTIFICATIONS);
@@ -601,61 +682,40 @@ const App = () => {
 
   const handleAllowNotifications = async () => {
     const result = await request(PERMISSIONS.ANDROID.POST_NOTIFICATIONS);
-    if (result === RESULTS.GRANTED) {
-      setShowNotificationModal(false);
-    }
+    if (result === RESULTS.GRANTED) setShowNotificationModal(false);
   };
 
-  /* ----------------- OneSignal init (top-level, runs once) ----------------- */
+  // OneSignal init
   useEffect(() => {
     try {
-      // Replace with your actual OneSignal App ID
       const ONESIGNAL_APP_ID = 'fc34c762-8fbb-45c8-aeb6-b04afbe7c930';
-
       if (!OneSignal) {
-        console.warn(
-          'OneSignal is undefined. Make sure react-native-onesignal is installed and linked.',
-        );
+        console.warn('OneSignal is undefined.');
         return;
       }
-
-      // Initialize OneSignal
       OneSignal.setAppId(ONESIGNAL_APP_ID);
-
-      // Optional: prompt for iOS (no-op on Android)
-      OneSignal.promptForPushNotificationsWithUserResponse(response => {
-        console.log('OneSignal prompt response:', response);
-      });
-
-      // When a notification is received in foreground
+      OneSignal.promptForPushNotificationsWithUserResponse(response =>
+        console.log('OneSignal prompt response:', response),
+      );
       OneSignal.setNotificationWillShowInForegroundHandler(event => {
         const notif = event.getNotification();
-
-        // Android ke liye small icon override
         if (Platform.OS === 'android') {
           notif.android = {
             ...notif.android,
-            smallIcon: 'ic_stat_onesignal_default', // drawable folder me exact name, extension mat likho
+            smallIcon: 'ic_stat_onesignal_default',
           };
         }
-
-        console.log('OneSignal foreground notification:', notif);
         event.complete(notif);
       });
-
-      // When a notification is opened by the user
-      OneSignal.setNotificationOpenedHandler(opened => {
-        console.log('OneSignal notification opened:', opened);
-        // Navigate ya handle data kar sakte ho
-      });
-
-      console.log('OneSignal initialized with app id:', ONESIGNAL_APP_ID);
+      OneSignal.setNotificationOpenedHandler(opened =>
+        console.log('OneSignal notification opened:', opened),
+      );
     } catch (err) {
       console.error('OneSignal init error:', err);
     }
-  }, []); // runs once only
+  }, []);
 
-  /* ----------------- Notifee action handler ----------------- */
+  // Notifee action handler
   async function actionHandler({
     type,
     detail,
@@ -671,161 +731,119 @@ const App = () => {
       cancelHlsDownload(detail.notification?.data?.fileName!);
       try {
         const files = await RNFS.readDir(downloadFolder);
-        const foundFile = files.find(fileItem => {
-          const nameWithoutExtension = fileItem.name
-            .split('.')
-            .slice(0, -1)
-            .join('.');
-          return nameWithoutExtension === detail.notification?.data?.fileName;
-        });
-        if (foundFile) {
-          await RNFS.unlink(foundFile.path);
-        }
+        const foundFile = files.find(
+          fileItem =>
+            fileItem.name.split('.').slice(0, -1).join('.') ===
+            detail.notification?.data?.fileName,
+        );
+        if (foundFile) await RNFS.unlink(foundFile.path);
       } catch (error) {
         console.log(error);
       }
     }
-
     if (type === EventType.PRESS && detail.pressAction?.id === 'install') {
       const res = await RNFS.exists(
         `${RNFS.DownloadDirectoryPath}/${detail.notification?.data?.name}`,
       );
       if (res) {
         const hasPermission = await checkAppInstallPermission();
-        if (!hasPermission) {
-          await requestAppInstallPermission();
-        }
+        if (!hasPermission) await requestAppInstallPermission();
         const fileUri = `file://${RNFS.DownloadDirectoryPath}/${detail.notification?.data?.name}`;
-        Linking.openURL(fileUri).catch(err => {
-          console.error('Failed to open APK file:', err);
-        });
+        Linking.openURL(fileUri).catch(err =>
+          console.error('Failed to open APK file:', err),
+        );
       }
     }
   }
 
   useEffect(() => {
-    const unsubscribe = notifee.onForegroundEvent(({type, detail}) => {
-      actionHandler({type, detail});
-    });
-    return () => {
-      unsubscribe();
-    };
+    const unsubscribe = notifee.onForegroundEvent(({type, detail}) =>
+      actionHandler({type, detail}),
+    );
+    return () => unsubscribe();
   }, []);
 
-  /* ----------------- Providers update service ----------------- */
+  // Providers update service
   useEffect(() => {
     updateProvidersService.startAutomaticUpdateCheck();
-    return () => {
-      updateProvidersService.stopAutomaticUpdateCheck();
-    };
+    return () => updateProvidersService.stopAutomaticUpdateCheck();
   }, []);
 
-  /* ----------------- Auto update check ----------------- */
+  // Auto update check
   useEffect(() => {
     if (settingsStorage.isAutoCheckUpdateEnabled()) {
       checkForUpdate(() => {}, settingsStorage.isAutoDownloadEnabled(), false);
     }
   }, []);
 
-  /* ----------------- UUID & user ping ----------------- */
+  // User ping (device ID)
   const generateUUID = () => {
     const S4 = () =>
       (((1 + Math.random()) * 0x10000) | 0).toString(16).substring(1);
-    return (
-      S4() +
-      S4() +
-      '-' +
-      S4() +
-      '-' +
-      S4() +
-      '-' +
-      S4() +
-      '-' +
-      S4() +
-      S4() +
-      S4()
-    );
+    return `${S4()}${S4()}-${S4()}-${S4()}-${S4()}-${S4()}${S4()}${S4()}`;
   };
-
   const sendUserPing = async () => {
     const API_URL = 'http://10.0.2.2:3000/api/user-ping';
     try {
       let userId = null;
-      if (Platform.OS === 'android') {
-        userId = Application.androidId;
-      } else if (Platform.OS === 'ios') {
+      if (Platform.OS === 'android') userId = Application.androidId;
+      else if (Platform.OS === 'ios')
         userId = await Application.getIosIdForVendorAsync();
-      }
-
       if (!userId) userId = generateUUID();
-
-      const pingData = {userId, platform: Platform.OS};
-
       await fetch(API_URL, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(pingData),
+        body: JSON.stringify({userId, platform: Platform.OS}),
       });
-
-      console.log('User activity logged successfully.');
     } catch (error) {
       console.error('Failed to log user activity:', error);
     }
   };
-
   useEffect(() => {
     sendUserPing();
   }, []);
 
-  /* ----------------- Choose Main Component hook-safely ----------------- */
-  // Note: appMode comes from a hook above; we must not call hooks conditionally.
+  // Determine main component based on appMode
   let MainComponent = TabStackScreen;
-  if (appMode === 'video') {
-    MainComponent = TabStackScreen;
-  } else if (appMode === 'music') {
-    MainComponent = MusicRootStackScreen;
-  } else {
-    MainComponent = TVRootStackScreen;
-  }
+  if (appMode === 'video') MainComponent = TabStackScreen;
+  else if (appMode === 'music') MainComponent = MusicRootStackScreen;
+  else MainComponent = TVRootStackScreen;
 
   const hasSeenOnboarding = MMKV.getBool('hasSeenOnboarding') === true;
 
-  /* ----------------- Render ----------------- */
+  // Wait for login check to complete before rendering navigation
+  let initialRoute: keyof RootStackParamList = hasSeenOnboarding
+    ? 'MainStack'
+    : 'Onboarding';
+
   return (
     <GlobalErrorBoundary>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
-          {/* FIX: Using 'additive' automatically pads the bottom to avoid the nav bar,
-              allowing the absolute TabBar to sit perfectly above it. */}
           <SafeAreaView
-            edges={{
-              right: 'off',
-              top: 'off',
-              left: 'off',
-              bottom: 'additive',
-            }}
+            edges={{right: 'off', top: 'off', left: 'off', bottom: 'additive'}}
             className="flex-1"
             style={{backgroundColor: 'black'}}>
             <NavigationContainer
-              onReady={async () => await BootSplash.hide({fade: true})}
+              ref={navigationRef}
+              onReady={async () => {
+                await BootSplash.hide({fade: true});
+                setCurrentRouteName(
+                  navigationRef.getCurrentRoute()?.name || '',
+                );
+              }}
+              onStateChange={() => {
+                const currentRoute =
+                  navigationRef.getCurrentRoute()?.name || '';
+                if (currentRouteName !== currentRoute)
+                  setCurrentRouteName(currentRoute);
+              }}
               theme={{
                 fonts: {
-                  regular: {
-                    fontFamily: 'Inter_400Regular',
-                    fontWeight: '400',
-                  },
-                  medium: {
-                    fontFamily: 'Inter_500Medium',
-                    fontWeight: '500',
-                  },
-                  bold: {
-                    fontFamily: 'Inter_700Bold',
-                    fontWeight: '700',
-                  },
-                  heavy: {
-                    fontFamily: 'Inter_800ExtraBold',
-                    fontWeight: '800',
-                  },
+                  regular: {fontFamily: 'Inter_400Regular', fontWeight: '400'},
+                  medium: {fontFamily: 'Inter_500Medium', fontWeight: '500'},
+                  bold: {fontFamily: 'Inter_700Bold', fontWeight: '700'},
+                  heavy: {fontFamily: 'Inter_800ExtraBold', fontWeight: '800'},
                 },
                 dark: true,
                 colors: {
@@ -838,9 +856,7 @@ const App = () => {
                 },
               }}>
               <Stack.Navigator
-                initialRouteName={
-                  hasSeenOnboarding ? 'MainStack' : 'Onboarding'
-                }
+                initialRouteName={initialRoute}
                 screenOptions={{
                   headerShown: false,
                   animation: 'ios_from_right',
@@ -849,6 +865,8 @@ const App = () => {
                   contentStyle: {backgroundColor: 'transparent'},
                 }}>
                 <Stack.Screen name="Onboarding" component={Onboarding} />
+                <Stack.Screen name="Login" component={Login} />
+                {/* MainStack is the post-login root. It's typed and registered correctly. */}
                 <Stack.Screen name="MainStack" component={MainComponent} />
                 <Stack.Screen
                   name="Player"
@@ -856,11 +874,24 @@ const App = () => {
                   options={{orientation: 'landscape'}}
                 />
                 <Stack.Screen name="WatchTrailer" component={WebView} />
-
-                {/* ADDED CAST MOVIE GLOBALLY HERE */}
                 <Stack.Screen name="CastMovie" component={CastMovie} />
+                <Stack.Screen name="ChatHistory" component={ChatHistory} />
+                <Stack.Screen
+                  name="YTHome"
+                  component={YTHome}
+                  options={{headerShown: false}}
+                />
               </Stack.Navigator>
             </NavigationContainer>
+
+            <AI
+              currentRoute={currentRouteName}
+              onNavigateToHistory={() => {
+                if (navigationRef.isReady())
+                  navigationRef.navigate('ChatHistory' as never);
+              }}
+            />
+
             <NotificationPromptModal
               isVisible={showNotificationModal}
               onClose={() => setShowNotificationModal(false)}

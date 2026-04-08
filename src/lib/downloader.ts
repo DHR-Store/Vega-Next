@@ -76,6 +76,9 @@ async function showDownloadNotification(task: DownloadTask) {
         { title: 'Cancel', pressAction: { id: `cancel_${task.fileName}` } },
       ],
       onlyAlertOnce: true,
+      
+      // 👇 Keeps the JS thread alive when the app is killed
+      asForegroundService: true, 
     },
   });
 }
@@ -89,22 +92,38 @@ function formatBytes(bytes: number) {
 }
 
 // 🧠 Notification button handler
-notifee.onForegroundEvent(async ({ type, detail }) => {
+export async function handleDownloadAction(type: EventType, detail: any) {
   if (type === EventType.ACTION_PRESS) {
+    if (!detail.pressAction) return;
     const actionId = detail.pressAction.id;
     if (actionId.startsWith('toggle_')) {
       const fileName = actionId.replace('toggle_', '');
-      togglePauseResume(fileName);
+      await togglePauseResume(fileName);
     } else if (actionId.startsWith('cancel_')) {
       const fileName = actionId.replace('cancel_', '');
-      cancelDownload(fileName);
+      await cancelDownload(fileName);
     }
   }
+}
+
+// Keep this for when the app is OPEN
+notifee.onForegroundEvent(async ({ type, detail }) => {
+  await handleDownloadAction(type, detail);
 });
 
 // 🟡 Pause / Resume Logic
 async function togglePauseResume(fileName: string) {
-  const task = Array.from(activeDownloads.values()).find(d => d.fileName === fileName);
+  let task = Array.from(activeDownloads.values()).find(d => d.fileName === fileName);
+
+  // FIX: Recover from AsyncStorage if app was killed and memory wiped
+  if (!task) {
+    const savedState = await AsyncStorage.getItem(`download_${fileName}`);
+    if (savedState) {
+      task = JSON.parse(savedState);
+      activeDownloads.set(task.jobId, task); // put back in memory
+    }
+  }
+
   if (!task) return;
 
   if (task.type === 'hls') {
@@ -138,19 +157,34 @@ async function togglePauseResume(fileName: string) {
 
 // ❌ Cancel Logic
 async function cancelDownload(fileName: string) {
-  const task = Array.from(activeDownloads.values()).find(d => d.fileName === fileName);
+  let task = Array.from(activeDownloads.values()).find(d => d.fileName === fileName);
+
+  // FIX: Recover from AsyncStorage if app was killed and memory wiped
+  if (!task) {
+    const savedState = await AsyncStorage.getItem(`download_${fileName}`);
+    if (savedState) {
+      task = JSON.parse(savedState);
+    }
+  }
+
   if (!task) return;
 
-  if (task.type === 'hls') cancelHlsDownload(task.jobId);
-  else if (!task.paused) RNFS.stopDownload(task.jobId as number);
+  if (task.type === 'hls') {
+    cancelHlsDownload(task.jobId);
+  } else if (!task.paused) {
+    RNFS.stopDownload(task.jobId as number);
+  }
 
   task.canceled = true;
   await saveTaskState(task);
 
   activeDownloads.delete(task.jobId);
   await notifee.cancelNotification(fileName);
+  
+  // FIX: Explicitly shut down the foreground service lock
+  await notifee.stopForegroundService();
 
-  if (await RNFS.exists(task.path)) {
+  if (task.path && await RNFS.exists(task.path)) {
     try {
       await RNFS.unlink(task.path);
     } catch {}

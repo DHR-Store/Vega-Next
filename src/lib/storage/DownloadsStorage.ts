@@ -22,12 +22,13 @@ export interface DownloadPayload {
 }
 
 /**
- * Downloads storage manager
+ * Downloads storage manager.
+ * Persists all download state to MMKV so it survives app kills/restarts.
  */
-
 export class DownloadsStorage {
   /**
-   * Get all downloaded files
+   * Get all downloaded files from persistent storage.
+   * Returns a fresh Map on every call — always reflects the latest saved state.
    */
   getDownloads(): Map<string, DownloadPayload> {
     const downloadsString = mainStorage.getString(
@@ -47,7 +48,8 @@ export class DownloadsStorage {
   }
 
   /**
-   * Save downloaded files information
+   * Persist the current downloads map to MMKV.
+   * Called after every state change so no data is lost on app kill.
    */
   saveDownloads(downloads: Map<string, DownloadPayload>): void {
     mainStorage.setString(
@@ -101,3 +103,4 @@ export class DownloadsStorage {
 
 // Export a singleton instance
 export const downloadsStorage = new DownloadsStorage();
+

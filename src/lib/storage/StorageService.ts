@@ -1,17 +1,14 @@
-import { MMKVLoader } from 'react-native-mmkv-storage';
-import { type MMKVStorage } from 'react-native-mmkv-storage/src/index';
+import {MMKVLoader} from 'react-native-mmkv-storage';
+import {type MMKVStorage} from 'react-native-mmkv-storage/src/index';
 
 /**
  * Interface for the StorageService class.
- * This has been updated to reflect more robust return types.
  */
 export interface IStorageService {
   getString(key: string): string | undefined;
   setString(key: string, value: string): void;
-  // getBool now correctly returns `boolean | undefined` when no defaultValue is provided.
   getBool(key: string, defaultValue?: boolean): boolean | undefined;
   setBool(key: string, value: boolean): void;
-  // getNumber is now more versatile.
   getNumber(key: string): number | undefined;
   setNumber(key: string, value: number): void;
   getObject<T>(key: string): T | undefined;
@@ -19,17 +16,14 @@ export interface IStorageService {
   getArray<T>(key: string): T[] | undefined;
   setArray<T>(key: string, value: T[]): void;
   delete(key: string): void;
-  // 'contains' is now a more efficient operation.
   contains(key: string): boolean;
   clearAll(): void;
 }
 
 /**
  * Base storage service that wraps MMKV operations.
- * This version includes several fixes for improved functionality and efficiency.
  */
 export class StorageService implements IStorageService {
-  // Use a more specific type for the MMKV instance for better type safety.
   private storage: MMKVStorage;
 
   constructor(instanceId?: string) {
@@ -39,7 +33,6 @@ export class StorageService implements IStorageService {
       : loader.initialize();
   }
 
-  // String operations
   getString(key: string): string | undefined {
     return this.storage.getString(key);
   }
@@ -48,13 +41,8 @@ export class StorageService implements IStorageService {
     this.storage.setString(key, value);
   }
 
-  // Boolean operations
-  // FIX: This method is updated to correctly handle the optional defaultValue.
-  // If no defaultValue is provided and the value is not found, it now returns `undefined`.
   getBool(key: string, defaultValue?: boolean): boolean | undefined {
     const value = this.storage.getBool(key);
-    // If MMKV returns undefined, we return the provided defaultValue, which can also be undefined.
-    // This allows for clearer logic in the calling code.
     return value === undefined ? defaultValue : value;
   }
 
@@ -62,25 +50,17 @@ export class StorageService implements IStorageService {
     this.storage.setBool(key, value);
   }
 
-  // Number operations
-  // FIX: Using the correct MMKV methods for numbers.
-  // `getInt` is used to retrieve a number, which aligns with how MMKV stores numbers.
   getNumber(key: string): number | undefined {
     return this.storage.getInt(key);
   }
 
-  // FIX: Using the correct MMKV method for numbers.
-  // `setInt` is the appropriate method to store number values in the MMKV store.
   setNumber(key: string, value: number): void {
     this.storage.setInt(key, value);
   }
 
-  // Object operations
   getObject<T>(key: string): T | undefined {
     const json = this.storage.getString(key);
-    if (!json) {
-      return undefined;
-    }
+    if (!json) return undefined;
     try {
       return JSON.parse(json) as T;
     } catch (e) {
@@ -93,7 +73,6 @@ export class StorageService implements IStorageService {
     this.storage.setString(key, JSON.stringify(value));
   }
 
-  // Array operations
   getArray<T>(key: string): T[] | undefined {
     return this.getObject<T[]>(key);
   }
@@ -102,25 +81,93 @@ export class StorageService implements IStorageService {
     this.setObject(key, value);
   }
 
-  // Delete operations
   delete(key: string): void {
     this.storage.removeItem(key);
   }
 
-  // Check if key exists
-  // FIX: This is a significant performance improvement.
-  // The original code performed up to three read operations.
-  // The MMKV `hasKey` method provides a single, highly optimized check.
   contains(key: string): boolean {
     return this.storage.hasKey(key);
   }
 
-  // Clear all storage
   clearAll(): void {
     this.storage.clearStore();
   }
 }
 
-// Create and export default instances
-export const mainStorage: IStorageService = new StorageService();
-export const cacheStorage: IStorageService = new StorageService('cache');
+// ─────────────────────────────────────────────────────────────
+// Per-user storage manager
+// When a user logs in we switch all stores to a user-scoped
+// MMKV partition so their data is isolated and can be restored
+// after reinstall by pulling from the cloud (CloudSyncService).
+// ─────────────────────────────────────────────────────────────
+
+const GUEST_PARTITION = 'main';
+const CACHE_PARTITION = 'cache';
+
+class UserStorageService {
+  private _userId: string | null = null;
+  private _main: IStorageService = new StorageService(GUEST_PARTITION);
+  private _cache: IStorageService = new StorageService(CACHE_PARTITION);
+
+  /**
+   * Call this right after a successful sign-in / sign-out.
+   * Pass `null` to revert to the guest (shared) partition.
+   */
+  setCurrentUser(userId: string | null): void {
+    this._userId = userId;
+
+    if (userId) {
+      // Each user gets their own isolated MMKV partitions
+      this._main = new StorageService(`user-main-${userId}`);
+      this._cache = new StorageService(`user-cache-${userId}`);
+    } else {
+      this._main = new StorageService(GUEST_PARTITION);
+      this._cache = new StorageService(CACHE_PARTITION);
+    }
+  }
+
+  getCurrentUserId(): string | null {
+    return this._userId;
+  }
+
+  isLoggedIn(): boolean {
+    return this._userId !== null;
+  }
+
+  /** User-scoped main storage */
+  get main(): IStorageService {
+    return this._main;
+  }
+
+  /** User-scoped cache storage */
+  get cache(): IStorageService {
+    return this._cache;
+  }
+}
+
+/**
+ * storageService — singleton used by login.ts and the cloud sync
+ * service to partition data per user.
+ */
+export const storageService = new UserStorageService();
+
+// Convenience re-exports that always point at the active partition.
+// All storage classes (WatchHistoryStorage, WatchListStorage, etc.)
+// import these, so switching the user automatically redirects them.
+export const mainStorage: IStorageService = new Proxy(
+  {} as IStorageService,
+  {
+    get(_target, prop: keyof IStorageService) {
+      return (storageService.main as any)[prop].bind(storageService.main);
+    },
+  },
+);
+
+export const cacheStorage: IStorageService = new Proxy(
+  {} as IStorageService,
+  {
+    get(_target, prop: keyof IStorageService) {
+      return (storageService.cache as any)[prop].bind(storageService.cache);
+    },
+  },
+);

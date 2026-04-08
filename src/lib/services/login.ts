@@ -1,0 +1,222 @@
+/**
+ * login.ts — Supabase email/password auth.
+ * Syncs watchHistory and watchList only. Providers are NOT synced.
+ * Supports local profile photo stored in user's MMKV partition.
+ */
+
+import 'react-native-url-polyfill/auto';
+import {createClient, SupabaseClient, User as SupabaseUser} from '@supabase/supabase-js';
+import {MMKV} from 'react-native-mmkv';
+import {storageService} from '../storage/StorageService';
+import {cloudSyncService} from '../services/CloudSyncService';
+
+import useWatchHistoryStore from '../zustand/watchHistrory';
+import useWatchListStore from '../zustand/watchListStore';
+
+const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+const SUPABASE_ANON_KEY =
+  'YOUR_SUPABASE_ANON_KEY';
+
+// MMKV key used to store the user's custom profile photo (base64 data URI)
+const PROFILE_PHOTO_KEY = 'user_profile_photo';
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  /** URL from OAuth provider (Google etc.) — may be null for email accounts */
+  photo?: string;
+}
+
+function rehydrateAllStores(): void {
+  try {
+    useWatchHistoryStore.getState().rehydrate();
+    useWatchListStore.getState().rehydrate();
+    console.log('[UserSession] Stores rehydrated ✅');
+  } catch (e) {
+    console.warn('[UserSession] Store rehydration failed (non-fatal):', e);
+  }
+}
+
+class UserSession {
+  private static instance: UserSession;
+  private readonly supabase: SupabaseClient;
+  private readonly sessionStorage = new MMKV({id: 'user-session'});
+  private currentUser: User | null = null;
+
+  private constructor() {
+    this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    });
+    this._restoreSession();
+  }
+
+  static getInstance(): UserSession {
+    if (!UserSession.instance) {
+      UserSession.instance = new UserSession();
+    }
+    return UserSession.instance;
+  }
+
+  private _mapSupabaseUser(su: SupabaseUser): User {
+    return {
+      id: su.id,
+      email: su.email ?? '',
+      name:
+        su.user_metadata?.full_name ??
+        su.user_metadata?.name ??
+        (su.email ?? '').split('@')[0],
+      photo: su.user_metadata?.avatar_url ?? undefined,
+    };
+  }
+
+  private _restoreSession(): void {
+    try {
+      const userJson = this.sessionStorage.getString('currentUser');
+      if (userJson) {
+        this.currentUser = JSON.parse(userJson) as User;
+        storageService.setCurrentUser(this.currentUser.id);
+        rehydrateAllStores();
+        console.log('[UserSession] Session restored for:', this.currentUser.email);
+      }
+    } catch (e) {
+      console.error('[UserSession] Failed to restore session:', e);
+      this.currentUser = null;
+    }
+  }
+
+  private async _finaliseLogin(user: User): Promise<User> {
+    this.currentUser = user;
+    this.sessionStorage.set('currentUser', JSON.stringify(user));
+    storageService.setCurrentUser(user.id);
+    await cloudSyncService.pullUserData(user.id);
+    rehydrateAllStores();
+    cloudSyncService
+      .saveUserProfile(user.id, {email: user.email, name: user.name, photo: user.photo})
+      .catch(() => {});
+    return user;
+  }
+
+  // ── Profile photo ──────────────────────────────────────────────────────────
+
+  /**
+   * Save a custom profile photo for the current user.
+   * Pass a base64 data URI: "data:image/jpeg;base64,/9j/4AAQ..."
+   * Stored in the user's own MMKV partition — survives app restarts.
+   */
+  updateProfilePhoto(base64DataUri: string): void {
+    if (!this.currentUser) return;
+    // storageService.main always points at the active user's partition
+    storageService.main.setString(PROFILE_PHOTO_KEY, base64DataUri);
+    console.log('[UserSession] Profile photo updated ✅');
+  }
+
+  /**
+   * Get the custom profile photo for the current user.
+   * Returns the base64 data URI string, or null if not set.
+   */
+  getProfilePhoto(): string | null {
+    if (!this.currentUser) return null;
+    return storageService.main.getString(PROFILE_PHOTO_KEY) ?? null;
+  }
+
+  /**
+   * Remove the custom profile photo.
+   */
+  clearProfilePhoto(): void {
+    if (!this.currentUser) return;
+    storageService.main.delete(PROFILE_PHOTO_KEY);
+  }
+
+  /**
+   * Returns the best available photo URI in priority order:
+   *  1. Custom photo set by user (local, base64)
+   *  2. OAuth provider photo (remote URL, e.g. from Google)
+   *  3. null — caller should show initials avatar
+   */
+  getBestPhotoUri(): string | null {
+    return this.getProfilePhoto() ?? this.currentUser?.photo ?? null;
+  }
+
+  // ── Auth ───────────────────────────────────────────────────────────────────
+
+  async signUp(email: string, password: string): Promise<User> {
+    const {data, error} = await this.supabase.auth.signUp({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    if (error) throw new Error(error.message);
+    if (!data.session && data.user) {
+      try {
+        return await this.signInWithEmail(email, password);
+      } catch (_) {
+        throw new Error(
+          'Account created! Please check your email to confirm your account, then sign in.',
+        );
+      }
+    }
+    if (!data.user) throw new Error('Sign up failed. Please try again.');
+    return this._finaliseLogin(this._mapSupabaseUser(data.user));
+  }
+
+  async signInWithEmail(email: string, password: string): Promise<User> {
+    const {data, error} = await this.supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    if (error) {
+      if (
+        error.message.toLowerCase().includes('email not confirmed') ||
+        error.message.toLowerCase().includes('not confirmed')
+      ) {
+        await this.supabase.auth
+          .resend({type: 'signup', email: email.trim().toLowerCase()})
+          .catch(() => {});
+        throw new Error(
+          'Your email is not confirmed yet.\n\nWe just resent the confirmation email — please check your inbox, then try again.\n\nOR: Go to Supabase → Authentication → Settings and turn off "Enable email confirmations".',
+        );
+      }
+      if (
+        error.message.toLowerCase().includes('invalid login') ||
+        error.message.toLowerCase().includes('invalid credentials')
+      ) {
+        throw new Error('Incorrect email or password. Please try again.');
+      }
+      throw new Error(error.message);
+    }
+    if (!data.user) throw new Error('Sign in failed. Please try again.');
+    return this._finaliseLogin(this._mapSupabaseUser(data.user));
+  }
+
+  async sendPasswordReset(email: string): Promise<void> {
+    const {error} = await this.supabase.auth.resetPasswordForEmail(
+      email.trim().toLowerCase(),
+    );
+    if (error) throw new Error(error.message);
+  }
+
+  async signOut(): Promise<void> {
+    if (this.currentUser) {
+      await cloudSyncService.pushUserData(this.currentUser.id).catch(() => {});
+    }
+    await this.supabase.auth.signOut().catch(() => {});
+    this.currentUser = null;
+    this.sessionStorage.delete('currentUser');
+    storageService.setCurrentUser(null);
+    rehydrateAllStores();
+  }
+
+  getCurrentUser(): User | null {
+    return this.currentUser;
+  }
+
+  isLoggedIn(): boolean {
+    return this.currentUser !== null;
+  }
+}
+
+export const userSession = UserSession.getInstance();

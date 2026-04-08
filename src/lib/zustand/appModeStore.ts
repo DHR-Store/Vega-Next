@@ -42,4 +42,3 @@ const useAppModeStore = create<AppModeState>()(
 );
 
 export default useAppModeStore;
-

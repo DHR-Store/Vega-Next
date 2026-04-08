@@ -15,12 +15,21 @@ export const useHomePageData = ({
   return useQuery<HomePageData[], Error>({
     queryKey: ['homePageData', provider.value],
     queryFn: async ({signal}) => {
-      // Fetch fresh data - cache is handled by React Query
+      // 1. Fetch fresh data
       const data = await getHomePageData(provider, signal);
+      
+      // 2. Cache successful responses immediately inside the queryFn
+      if (data && data.length > 0) {
+        cacheStorage.setString(
+          'homeData' + provider.value,
+          JSON.stringify(data),
+        );
+      }
+      
       return data;
     },
     enabled: enabled && !!provider?.value,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 2 * 60 * 1000, // 2 minutes
     gcTime: 30 * 60 * 1000, // 30 minutes
     retry: (failureCount, error) => {
       if (error.name === 'AbortError') {
@@ -29,7 +38,8 @@ export const useHomePageData = ({
       return failureCount < 3;
     },
     retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
-    // Add initial data from cache for instant loading
+    
+    // Add initial data from cache for instant loading offline
     initialData: () => {
       const cache = cacheStorage.getString('homeData' + provider.value);
       if (cache) {
@@ -41,17 +51,11 @@ export const useHomePageData = ({
       }
       return undefined;
     },
-    // Cache successful responses
-    meta: {
-      onSuccess: (data: HomePageData[]) => {
-        if (data && data.length > 0) {
-          cacheStorage.setString(
-            'homeData' + provider.value,
-            JSON.stringify(data),
-          );
-        }
-      },
-    },
+    
+    // 3. IMPORTANT: Tell React Query this initial data is old (stale).
+    // This forces it to show the cache immediately, but trigger a background 
+    // fetch to auto-refresh the data whenever the user is online.
+    initialDataUpdatedAt: 0, 
   });
 };
 
@@ -83,6 +87,8 @@ export const useHeroMetadata = (heroLink: string, providerValue: string) => {
         provider: providerValue,
       });
 
+      let finalData = info;
+
       // Try to get enhanced metadata from Stremio if imdbId is available
       if (info.imdbId) {
         try {
@@ -90,24 +96,24 @@ export const useHeroMetadata = (heroLink: string, providerValue: string) => {
             `https://v3-cinemeta.strem.io/meta/${info.type}/${info.imdbId}.json`,
             {timeout: 5000},
           );
-          return response.data?.meta || info;
+          finalData = response.data?.meta || info;
         } catch {
-          return info; // Fallback to original info if Stremio fails
+          finalData = info; // Fallback to original info if Stremio fails
         }
       }
 
-      return info;
+      // Cache hero metadata separately right after fetching
+      if (finalData) {
+        cacheStorage.setString(heroLink, JSON.stringify(finalData));
+      }
+
+      return finalData;
     },
     enabled: !!heroLink && !!providerValue,
-    staleTime: 10 * 60 * 1000, // 10 minutes - hero metadata changes less frequently
+    staleTime: 1 * 60 * 1000, // 10 minutes - hero metadata changes less frequently
     gcTime: 60 * 60 * 1000, // 1 hour
     retry: 2,
-    // Cache hero metadata separately
-    meta: {
-      onSuccess: (data: any) => {
-        cacheStorage.setString(heroLink, JSON.stringify(data));
-      },
-    },
+    
     // Use cached data as initial data
     initialData: () => {
       const cached = cacheStorage.getString(heroLink);
@@ -120,5 +126,8 @@ export const useHeroMetadata = (heroLink: string, providerValue: string) => {
       }
       return undefined;
     },
+    
+    // Force background refetch if network is available
+    initialDataUpdatedAt: 0, 
   });
 };

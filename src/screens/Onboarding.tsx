@@ -93,6 +93,26 @@ const Onboarding = () => {
             </View>
           </View>
 
+          <View className="flex-row items-center mb-6">
+            {/* Icon Box */}
+            <View className="bg-[#1A1A1A] p-3 rounded-xl mr-4">
+              <Ionicons name="chatbubble-ellipses" size={22} color={primary} />
+            </View>
+
+            {/* Text Content */}
+            <View className="flex-1">
+              <Text className="text-white text-lg font-bold mb-0.5">
+                Vega-Next AI Assistant
+              </Text>
+
+              <Text className="text-gray-400 text-sm leading-5">
+                Ask anything about movies, anime, or TV shows. Get smart
+                recommendations, detailed info, and instant answers powered by
+                AI.
+              </Text>
+            </View>
+          </View>
+
           {/* Discover */}
           <View className="flex-row items-center mb-6">
             <View className="bg-[#1A1A1A] p-3 rounded-xl mr-4">

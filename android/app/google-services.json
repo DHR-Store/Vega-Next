@@ -12,7 +12,20 @@
           "package_name": "com.vega.next"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "228372103642-mfo5scam8958dnando9kferias1gttrk.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.vega.next",
+            "certificate_hash": "aee55c4faf52cbea6f45cc8a5c48ed801c4c36b4"
+          }
+        },
+        {
+          "client_id": "228372103642-aj8j7gqah9d98nutm1hniboi7922f4hs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBBcLHFR6X19A422HA6sxjNe2_9tn5WsP4"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "228372103642-aj8j7gqah9d98nutm1hniboi7922f4hs.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

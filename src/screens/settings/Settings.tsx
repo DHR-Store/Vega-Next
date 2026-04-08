@@ -10,8 +10,12 @@ import {
   TextInput,
   Clipboard,
   ToastAndroid,
+  Modal,
+  Image,
+  SafeAreaView,
+  ActivityIndicator,
 } from 'react-native';
-import React, {useCallback, useMemo, useEffect, useState} from 'react';
+import React, {useCallback, useMemo, useEffect, useState, useRef} from 'react';
 import {
   settingsStorage,
   cacheStorageService,
@@ -41,6 +45,13 @@ import {check, request, PERMISSIONS, RESULTS} from 'react-native-permissions';
 
 import RenderProviderFlagIcon from '../../components/RenderProviderFLagIcon';
 import useAppModeStore from '../../lib/zustand/appModeStore';
+import {MMKV} from '../../lib/Mmkv';
+import {DiscordRPC} from '../../lib/services/DiscordRPC';
+import {WebView} from 'react-native-webview';
+import {userSession, User} from '../../lib/services/login';
+import Login from '../../screens/Login';
+import {DeviceEventEmitter} from 'react-native';
+import ProfileAvatar from '../../screens/Profileavatar';
 
 type Props = NativeStackScreenProps<SettingsStackParamList, 'Settings'>;
 
@@ -223,6 +234,156 @@ const Settings = ({navigation}: Props) => {
   );
   const [syncLink, setSyncLink] = useState('');
 
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [showLogoutMenu, setShowLogoutMenu] = useState(false);
+
+  useEffect(() => {
+    const loadUser = () => {
+      setCurrentUser(userSession.getCurrentUser());
+    };
+
+    loadUser();
+
+    // Listen for login events from the Login screen
+    const loginSubscription = DeviceEventEmitter.addListener(
+      'userLoggedIn',
+      loadUser,
+    );
+    const logoutSubscription = DeviceEventEmitter.addListener(
+      'userLoggedOut',
+      loadUser,
+    );
+    // Add photo change listener
+    const photoSubscription = DeviceEventEmitter.addListener(
+      'profilePhotoChanged',
+      loadUser,
+    );
+
+    const unsubscribeFocus = navigation.addListener('focus', loadUser);
+
+    return () => {
+      unsubscribeFocus();
+      loginSubscription.remove();
+      logoutSubscription.remove();
+      photoSubscription.remove();
+    };
+  }, [navigation]);
+
+  // ==========================================
+  // --- DISCORD RPC STATES & LOGIC ---
+  // ==========================================
+  const [discordToken, setDiscordToken] = useState(
+    cacheStorageService.getString('discord_token') || '',
+  );
+  const [isDiscordConnected, setIsDiscordConnected] = useState(false);
+  const [showDiscordLogin, setShowDiscordLogin] = useState(false);
+
+  // Store the user's profile info
+  const [discordUser, setDiscordUser] = useState<{
+    username: string;
+    avatarUrl: string;
+  } | null>(null);
+
+  const webViewRef = useRef<any>(null);
+
+  // THE FIX: This script intercepts the raw network request during login
+  // and intercepts localStorage being set, guaranteeing we catch the token.
+  const injectedScript = `
+    (function() {
+      // 1. Intercept Network Requests (Catches the login API response)
+      var originalXHR = window.XMLHttpRequest.prototype.open;
+      var originalSend = window.XMLHttpRequest.prototype.send;
+      
+      window.XMLHttpRequest.prototype.open = function(method, url) {
+          this._url = url;
+          return originalXHR.apply(this, arguments);
+      };
+      
+      window.XMLHttpRequest.prototype.send = function() {
+          this.addEventListener('load', function() {
+              if (this._url && (this._url.includes('/auth/login') || this._url.includes('/auth/mfa'))) {
+                  try {
+                      var response = JSON.parse(this.responseText);
+                      if (response.token) {
+                          window.ReactNativeWebView.postMessage(response.token);
+                      }
+                  } catch(e) {}
+              }
+          });
+          return originalSend.apply(this, arguments);
+      };
+
+      // 2. Intercept LocalStorage (Catches the exact moment Discord saves the token)
+      var originalSetItem = window.localStorage.setItem;
+      window.localStorage.setItem = function(key, value) {
+          if (key === 'token' && value && value !== 'null') {
+              window.ReactNativeWebView.postMessage(value.replace(/"/g, ''));
+          }
+          originalSetItem.apply(this, arguments);
+      };
+
+      // 3. Fallback: The classic beforeunload trigger
+      setInterval(function() {
+          try {
+              window.dispatchEvent(new Event('beforeunload'));
+              var t = window.localStorage.getItem('token');
+              if (t && t !== 'null') {
+                  window.ReactNativeWebView.postMessage(t.replace(/"/g, ''));
+              }
+          } catch(e) {}
+      }, 1000);
+    })();
+    true;
+  `;
+
+  // Function to fetch user info from Discord using the token
+  const fetchDiscordUser = async (token: string) => {
+    try {
+      const res = await fetch('https://discord.com/api/v10/users/@me', {
+        headers: {Authorization: token},
+      });
+      if (res.ok) {
+        const data = await res.json();
+
+        // FIXED: Removed all the \ characters from the template strings
+        const avatarUrl = data.avatar
+          ? `https://cdn.discordapp.com/avatars/${data.id}/${data.avatar}.png`
+          : `https://cdn.discordapp.com/embed/avatars/${
+              parseInt(data.discriminator || '0') % 5
+            }.png`;
+
+        setDiscordUser({
+          username: data.global_name || data.username,
+          avatarUrl,
+        });
+      }
+    } catch (e) {
+      console.error('Failed to fetch Discord user', e);
+    }
+  };
+
+  useEffect(() => {
+    if (discordToken) {
+      fetchDiscordUser(discordToken);
+    }
+  }, [discordToken]);
+  // ==========================================
+
+  // Add this near your other state variables
+  const [ytProfilePic, setYtProfilePic] = useState<string | null>(
+    MMKV.getString('ytProfilePic') || null,
+  );
+  const [isYTLoginVisible, setIsYTLoginVisible] = useState(false);
+  const [isWebViewReady, setIsWebViewReady] = useState(false);
+
+  const closeYouTubeLogin = () => {
+    setIsWebViewReady(false); // 1. Unmount the WebView safely first
+    setTimeout(() => {
+      setIsYTLoginVisible(false); // 2. Close the modal after a tiny delay
+    }, 100);
+  };
+
   const handleProviderSelect = useCallback(
     (item: ProviderExtension) => {
       setProvider(item);
@@ -237,6 +398,28 @@ const Settings = ({navigation}: Props) => {
     },
     [setProvider, tabNavigation, setAppMode],
   );
+
+  // Use getBool from your local wrapper
+  const [aiEnabled, setAiEnabled] = useState(
+    MMKV.getBool('isAIEnabled') || false,
+  );
+
+  const toggleAiAssistant = useCallback(() => {
+    const newState = !aiEnabled;
+    setAiEnabled(newState);
+
+    // FIX: Use setBool() instead of set()
+    MMKV.setBool('isAIEnabled', newState);
+
+    DeviceEventEmitter.emit('toggleAIAssistant', newState);
+
+    if (settingsStorage.isHapticFeedbackEnabled()) {
+      ReactNativeHapticFeedback.trigger('virtualKey', {
+        enableVibrateFallback: true,
+        ignoreAndroidSystemSettings: false,
+      });
+    }
+  }, [aiEnabled]);
 
   const renderProviderItem = useCallback(
     (item: ProviderExtension, isSelected: boolean) => (
@@ -332,6 +515,33 @@ const Settings = ({navigation}: Props) => {
     );
   }, [networkProxyMode]);
   // --------------------
+
+  const handleGoogleSignIn = async () => {
+    setLoginLoading(true);
+    try {
+      const user = await userSession.signIn();
+      setCurrentUser(user);
+      ToastAndroid.show(`Welcome ${user.name}!`, ToastAndroid.SHORT);
+    } catch (err: any) {
+      const message = err?.message ?? 'Sign in failed';
+      ToastAndroid.show(message, ToastAndroid.LONG);
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setLoginLoading(true);
+    try {
+      await userSession.signOut();
+      setCurrentUser(null);
+      ToastAndroid.show('Signed out', ToastAndroid.SHORT);
+    } catch (err) {
+      ToastAndroid.show('Sign out failed', ToastAndroid.SHORT);
+    } finally {
+      setLoginLoading(false);
+    }
+  };
 
   const parseSyncLink = (link: string) => {
     // Helper to extract value by key from a complex URL string
@@ -456,6 +666,60 @@ const Settings = ({navigation}: Props) => {
           <Text className="text-2xl font-bold text-white mb-6">Settings</Text>
         </View>
 
+        {/* ========== TOP RIGHT ACCOUNT AVATAR ========== */}
+
+        <View className="absolute top-4 right-4 z-50">
+          {currentUser ? (
+            // LOGGED IN: Container for Avatar and Logout Menu
+            <View className="items-end">
+              {/* 1. Clickable Avatar to toggle the menu */}
+              <TouchableOpacity
+                onPress={() => setShowLogoutMenu(!showLogoutMenu)}
+                activeOpacity={0.7}>
+                <View pointerEvents="none">
+                  <ProfileAvatar
+                    size={40}
+                    // Disabled so it triggers the menu instead of the photo picker
+                    editable={false}
+                  />
+                </View>
+              </TouchableOpacity>
+
+              {/* 2. Logout Option Dropdown (Shows when avatar is clicked) */}
+              {showLogoutMenu && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowLogoutMenu(false); // Hide menu
+                    handleSignOut(); // Trigger your sign out function
+                  }}
+                  disabled={loginLoading}
+                  className="mt-2 bg-[#1A1A1A] border border-[#333] px-4 py-2 rounded-lg shadow-lg flex-row items-center justify-center">
+                  {loginLoading ? (
+                    <ActivityIndicator size="small" color="#ef4444" />
+                  ) : (
+                    <Text className="text-red-500 font-bold text-sm">
+                      Sign Out
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            // LOGGED OUT: Navigate to Login.tsx screen
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Login')}
+              className="w-10 h-10 rounded-full bg-white justify-center items-center shadow-md">
+              <Image
+                source={{
+                  uri: 'https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.png',
+                }}
+                style={{width: 20, height: 20}}
+                resizeMode="contain"
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+
         <Section>
           <View className="mb-6 flex-col gap-3">
             <Text className="text-gray-400 text-sm mb-1">App Mode</Text>
@@ -562,6 +826,13 @@ const Settings = ({navigation}: Props) => {
                   primaryColor={primary}
                   isLast={true}
                 />
+                <InternalOptionRow
+                  icon={<MaterialCommunityIcons name="shield-check-outline" />}
+                  text="Provider Checker"
+                  onPress={() => navigation.navigate('ProviderCheck' as any)}
+                  primaryColor={primary}
+                  isLast={true} // 👈 This is now the last item
+                />
               </View>
             </View>
           </Section>
@@ -626,6 +897,348 @@ const Settings = ({navigation}: Props) => {
           </View>
         </Section>
 
+        {/* --- DISCORD RPC INTEGRATION UI --- */}
+        <Section>
+          <View className="mb-6 flex-col gap-3">
+            <Text className="text-gray-400 text-sm mb-1">Integrations</Text>
+            <View className="bg-[#1A1A1A] rounded-xl overflow-hidden p-4">
+              <View className="flex-row items-center justify-between mb-3">
+                <View className="flex-row items-center">
+                  <MaterialCommunityIcons
+                    name="discord"
+                    size={22}
+                    color="#5865F2"
+                  />
+                  <Text className="text-white ml-3 text-base font-medium">
+                    Discord Rich Presence
+                  </Text>
+                </View>
+
+                {/* Display Profile Picture if logged in */}
+                {discordUser && (
+                  <Image
+                    source={{uri: discordUser.avatarUrl}}
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                      borderWidth: 1,
+                      borderColor: '#5865F2',
+                    }}
+                  />
+                )}
+              </View>
+
+              <Text className="text-gray-400 text-xs mb-4">
+                {discordUser
+                  ? `Logged in as ${discordUser.username}. Your watching status will update automatically.`
+                  : 'Login with your Discord account to show the movies you are watching on your profile.'}
+              </Text>
+
+              <TouchableOpacity
+                style={{
+                  backgroundColor: discordToken ? '#ef4444' : '#5865F2',
+                  padding: 12,
+                  borderRadius: 8,
+                  alignItems: 'center',
+                }}
+                onPress={() => {
+                  if (discordToken) {
+                    DiscordRPC.disconnect();
+                    setIsDiscordConnected(false);
+                    setDiscordToken('');
+                    setDiscordUser(null);
+                    cacheStorageService.setString('discord_token', '');
+                    ToastAndroid.show(
+                      'Logged out of Discord',
+                      ToastAndroid.SHORT,
+                    );
+                  } else {
+                    setShowDiscordLogin(true);
+                  }
+                }}>
+                <Text className="text-white font-bold">
+                  {discordToken ? 'Disconnect' : 'Login to Discord'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Section>
+
+        {/* --- DISCORD LOGIN MODAL --- */}
+        <Modal
+          visible={showDiscordLogin}
+          animationType="slide"
+          onRequestClose={() => setShowDiscordLogin(false)}>
+          <View style={{flex: 1, backgroundColor: '#36393f'}}>
+            <View className="p-4 bg-[#2f3136] flex-row justify-between items-center">
+              <Text className="text-white font-bold text-lg">
+                Login to Discord
+              </Text>
+              <TouchableOpacity onPress={() => setShowDiscordLogin(false)}>
+                <AntDesign name="close" size={24} color="white" />
+              </TouchableOpacity>
+            </View>
+
+            <WebView
+              ref={webViewRef}
+              source={{uri: 'https://discord.com/login'}}
+              injectedJavaScript={injectedScript}
+              incognito={true}
+              cacheEnabled={false}
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+              onNavigationStateChange={navState => {
+                if (
+                  navState.url.includes('/app') ||
+                  navState.url.includes('/channels')
+                ) {
+                  webViewRef.current?.injectJavaScript(injectedScript);
+                }
+              }}
+              onMessage={event => {
+                const extractedToken = event.nativeEvent.data;
+                // Double check it's a valid token format
+                if (
+                  extractedToken &&
+                  extractedToken.length > 30 &&
+                  extractedToken !== 'null'
+                ) {
+                  // 1. Immediately close the UI modal
+                  setShowDiscordLogin(false);
+
+                  // 2. Save token states
+                  setDiscordToken(extractedToken);
+                  cacheStorageService.setString(
+                    'discord_token',
+                    extractedToken,
+                  );
+
+                  // 3. Fetch user data (updates profile pic)
+                  fetchDiscordUser(extractedToken);
+
+                  // 4. Connect to RPC
+                  if (DiscordRPC && typeof DiscordRPC.connect === 'function') {
+                    DiscordRPC.connect(extractedToken);
+                    setIsDiscordConnected(true);
+                  }
+
+                  // 5. Success Message
+                  ToastAndroid.show(
+                    'Successfully connected to Discord!',
+                    ToastAndroid.LONG,
+                  );
+                }
+              }}
+            />
+          </View>
+        </Modal>
+        {/* ------------------------------- */}
+
+        {/* --- YOUTUBE INTEGRATION (YTPRO) SECTION --- */}
+        <Section>
+          <View className="mb-6 flex-col gap-3">
+            <Text className="text-gray-400 text-sm mb-1">YouTube</Text>
+            <View className="bg-[#1A1A1A] rounded-xl overflow-hidden p-4">
+              <View className="flex-row items-center justify-between mb-3">
+                <View className="flex-row items-center">
+                  {/* Show Profile Picture if available, otherwise show YouTube Icon */}
+                  {ytProfilePic ? (
+                    <Image
+                      source={{uri: ytProfilePic}}
+                      style={{width: 32, height: 32, borderRadius: 16}}
+                    />
+                  ) : (
+                    <AntDesign name="youtube" size={22} color="#FF0000" />
+                  )}
+                  <Text className="text-white ml-3 text-base font-medium">
+                    {ytProfilePic
+                      ? 'YouTube Account Connected'
+                      : 'YouTube Account & Mod'}
+                  </Text>
+                </View>
+
+                {/* Logout button if profile pic exists */}
+                {ytProfilePic && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setYtProfilePic(null);
+                      if (typeof MMKV.delete === 'function') {
+                        MMKV.delete('ytProfilePic');
+                      }
+                      ToastAndroid.show(
+                        'Logged out of YouTube Mod',
+                        ToastAndroid.SHORT,
+                      );
+                    }}>
+                    <Text className="text-red-500 text-xs font-bold">
+                      Logout
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <Text className="text-gray-400 text-xs mb-4">
+                Access YouTube with background play, ad-blocking, and media
+                extraction powered by YTPRO. Sign in to your account directly.
+              </Text>
+
+              <View style={{flexDirection: 'row', gap: 10}}>
+                {/* CONDITIONAL RENDERING */}
+                {!ytProfilePic ? (
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: '#333333',
+                      padding: 12,
+                      borderRadius: 8,
+                      alignItems: 'center',
+                      flex: 1,
+                    }}
+                    onPress={() => {
+                      if (settingsStorage.isHapticFeedbackEnabled()) {
+                        ReactNativeHapticFeedback.trigger('impactLight');
+                      }
+                      setIsYTLoginVisible(true);
+                    }}>
+                    <Text className="text-white font-bold">
+                      Login to YouTube
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: '#FF0000',
+                      padding: 12,
+                      borderRadius: 8,
+                      alignItems: 'center',
+                      flex: 1,
+                    }}
+                    onPress={() => {
+                      if (settingsStorage.isHapticFeedbackEnabled()) {
+                        ReactNativeHapticFeedback.trigger('impactLight');
+                      }
+                      navigation.navigate('YTHome' as never);
+                    }}>
+                    <Text className="text-white font-bold">Open YouTube</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </View>
+        </Section>
+        {/* ------------------------------------------- */}
+
+        {/* YOUTUBE LOGIN MODAL */}
+        <Modal
+          visible={isYTLoginVisible}
+          animationType="slide"
+          transparent={false}
+          presentationStyle="fullScreen"
+          onShow={() => setIsWebViewReady(true)}
+          onRequestClose={closeYouTubeLogin}>
+          <View style={{flex: 1, backgroundColor: 'black'}}>
+            {/* Header */}
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                padding: 15,
+                backgroundColor: '#1A1A1A',
+                borderBottomWidth: 1,
+                borderBottomColor: '#333',
+              }}>
+              <TouchableOpacity
+                onPress={closeYouTubeLogin}
+                style={{paddingRight: 15}}>
+                <AntDesign name="close" size={24} color="white" />
+              </TouchableOpacity>
+              <Text style={{color: 'white', fontSize: 18, fontWeight: 'bold'}}>
+                Login to YouTube
+              </Text>
+            </View>
+
+            {/* Login WebView (Only renders when Modal is fully open) */}
+            {isWebViewReady ? (
+              <WebView
+                style={{flex: 1, backgroundColor: 'black', opacity: 0.99}}
+                source={{
+                  uri: 'https://accounts.google.com/ServiceLogin?service=youtube&continue=https://m.youtube.com/',
+                }}
+                userAgent="Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                thirdPartyCookiesEnabled={true}
+                sharedCookiesEnabled={true} // <-- IMPORTANT: Shares auth cookies with YTHome
+                domStorageEnabled={true}
+                javaScriptEnabled={true}
+                setSupportMultipleWindows={false}
+                startInLoadingState={true}
+                onMessage={event => {
+                  try {
+                    const data = JSON.parse(event.nativeEvent.data);
+                    if (data.type === 'YT_LOGIN_SUCCESS') {
+                      setYtProfilePic(data.pp);
+
+                      if (typeof MMKV.setString === 'function') {
+                        MMKV.setString('ytProfilePic', data.pp);
+                      } else {
+                        MMKV.set('ytProfilePic', data.pp);
+                      }
+
+                      closeYouTubeLogin();
+                      ToastAndroid.show(
+                        'Successfully logged in!',
+                        ToastAndroid.SHORT,
+                      );
+                    }
+                  } catch (e) {
+                    console.log('Error parsing WebView message', e);
+                  }
+                }}
+                injectedJavaScript={`
+    setInterval(function() {
+      // 1. Prevent running in background hidden iframes
+      if (window !== window.top) return;
+
+      // 2. Only execute on YouTube domains
+      if (window.location.hostname === 'm.youtube.com' || window.location.hostname === 'www.youtube.com') {
+        
+        // 3. Make sure the 'Sign in' button is completely gone. 
+        // If it exists, the user is NOT fully logged in yet.
+        var signInBtn = document.querySelector('a[href*="ServiceLogin"]') || document.querySelector('.ytm-btn-sync');
+        if (signInBtn) return;
+
+        // 4. Find the authenticated profile picture safely
+        var img = document.querySelector('ytm-profile-icon img') || 
+                  document.querySelector('#avatar-btn img');
+        
+        // Ensure it's not a generic grey silhouette avatar
+        if (img && img.src && (img.src.includes('ggpht.com') || img.src.includes('googleusercontent.com'))) {
+          if (!img.src.includes('default_avatar')) {
+             window.ReactNativeWebView.postMessage(JSON.stringify({ 
+               type: 'YT_LOGIN_SUCCESS', 
+               pp: img.src 
+             }));
+          }
+        }
+      }
+    }, 2000); // Check every 2 seconds to allow the page to settle
+    true;
+  `}
+              />
+            ) : (
+              /* Temporary Loading State while Modal animates */
+              <View
+                style={{
+                  flex: 1,
+                  backgroundColor: 'black',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                }}>
+                <ActivityIndicator size="large" color="#FF0000" />
+              </View>
+            )}
+          </View>
+        </Modal>
+
         <Section>
           <View className="mb-6">
             <Text className="text-gray-400 text-sm mb-3">Options</Text>
@@ -655,6 +1268,70 @@ const Settings = ({navigation}: Props) => {
                 primaryColor={primary}
                 isLast={true}
               />
+            </View>
+          </View>
+        </Section>
+
+        {/* Vega-Next AI Section */}
+        <Section>
+          <View className="mb-6 flex-col gap-3">
+            <Text className="text-gray-400 text-sm mb-1">Vega-Next AI</Text>
+            <View className="bg-[#1A1A1A] rounded-xl overflow-hidden">
+              <View className="flex-row items-center justify-between p-4">
+                <View className="flex-row items-center flex-1 pr-2">
+                  <MaterialCommunityIcons
+                    name="robot-outline"
+                    size={22}
+                    color={primary}
+                  />
+                  <View className="flex-col ml-3 flex-1">
+                    <Text className="text-white text-base">
+                      Enable Vega-Next AI
+                    </Text>
+                    <Text className="text-gray-400 text-xs mt-0.5">
+                      Smart assistant for movies and entertainment
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => navigation.navigate('ChatHistory')}
+                      activeOpacity={0.8}
+                      style={{
+                        backgroundColor: '#FFFFFF',
+                        paddingVertical: 12,
+                        paddingHorizontal: 18,
+                        borderRadius: 12,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginVertical: 10,
+
+                        // Shadow (iOS)
+                        shadowColor: '#000',
+                        shadowOffset: {width: 0, height: 2},
+                        shadowOpacity: 0.2,
+                        shadowRadius: 3,
+
+                        // Elevation (Android)
+                        elevation: 4,
+                      }}>
+                      <Text
+                        style={{
+                          color: '#000',
+                          fontSize: 14,
+                          fontWeight: '600',
+                          letterSpacing: 0.5,
+                        }}>
+                        View AI Chat History
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <Switch
+                  trackColor={{false: '#767577', true: primary}}
+                  thumbColor={aiEnabled ? '#f4f3f4' : '#f4f3f4'}
+                  ios_backgroundColor="#3e3e3e"
+                  onValueChange={toggleAiAssistant}
+                  value={aiEnabled}
+                />
+              </View>
             </View>
           </View>
         </Section>
