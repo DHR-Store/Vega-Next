@@ -1,16 +1,19 @@
 import {
   Text,
   Modal,
-  Pressable,
   TouchableOpacity,
   Dimensions,
   ToastAndroid,
   View,
   Linking,
+  StyleSheet,
 } from 'react-native';
-import React, {useEffect, useRef, useMemo} from 'react';
+import React, {useEffect, useRef, useMemo, useCallback} from 'react';
 import {Stream} from '../lib/providers/types';
-import BottomSheet, {BottomSheetScrollView} from '@gorhom/bottom-sheet';
+import BottomSheet, {
+  BottomSheetScrollView,
+  BottomSheetBackdrop,
+} from '@gorhom/bottom-sheet';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import SkeletonLoader from './Skeleton';
 import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
@@ -42,8 +45,6 @@ const DownloadBottomSheet = ({
   const {primary} = useThemeStore(state => state);
   const [activeTab, setActiveTab] = React.useState<1 | 2>(1);
 
-  // FIXED: Flatten subtitles into a single array using useMemo.
-  // This removes the need for nested maps and makes length checks accurate.
   const parsedSubtitles = useMemo(() => {
     if (!data) return [];
     return data.reduce((acc: any[], server) => {
@@ -59,127 +60,144 @@ const DownloadBottomSheet = ({
     else bottomSheetRef.current?.close();
   }, [showModal]);
 
-  // PRESERVED: External Download/Play Logic for Video
-  const handlePressVideo = async (item: Stream) => {
-    const useExternal = settingsStorage.getBool(
-      'alwaysExternalDownloader',
-      false,
-    );
-    if (useExternal) {
-      try {
-        await Linking.openURL(item.link);
-      } catch (error) {
-        console.log('Failed to open external link:', error);
-      }
-    } else {
-      onPressVideo(item);
-    }
+  // FIX: Properly handle backdrop touches using Gorhom's native component
+  const renderBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+        pressBehavior="close"
+      />
+    ),
+    [],
+  );
+
+  const handlePressVideo = (item: Stream) => {
+    // 1. Let the BottomSheet animate closed cleanly FIRST
     bottomSheetRef.current?.close();
+
+    // 2. Defer the heavy download trigger so Reanimated animations don't crash
+    setTimeout(async () => {
+      const useExternal = settingsStorage.getBool(
+        'alwaysExternalDownloader',
+        false,
+      );
+      if (useExternal) {
+        try {
+          await Linking.openURL(item.link);
+        } catch (error) {
+          console.log('Failed to open external link:', error);
+        }
+      } else {
+        onPressVideo(item);
+      }
+    }, 300); // Wait 300ms for exit animation
   };
 
-  // PRESERVED: External Download/Play Logic for Subtitles
-  const handlePressSubs = async (item: {
+  const handlePressSubs = (item: {
     link: string;
     type: string;
     title: string;
   }) => {
-    const useExternal = settingsStorage.getBool(
-      'alwaysExternalDownloader',
-      false,
-    );
-    if (useExternal) {
-      try {
-        await Linking.openURL(item.link);
-      } catch (error) {
-        console.log('Failed to open subtitle link:', error);
-      }
-    } else {
-      onPressSubs(item);
-    }
     bottomSheetRef.current?.close();
+
+    setTimeout(async () => {
+      const useExternal = settingsStorage.getBool(
+        'alwaysExternalDownloader',
+        false,
+      );
+      if (useExternal) {
+        try {
+          await Linking.openURL(item.link);
+        } catch (error) {
+          console.log('Failed to open subtitle link:', error);
+        }
+      } else {
+        onPressSubs(item);
+      }
+    }, 300); // Wait 300ms for exit animation
   };
 
   return (
     <Modal
       onRequestClose={() => bottomSheetRef.current?.close()}
       visible={showModal}
-      transparent={true}>
-      <GestureHandlerRootView>
-        <Pressable
-          onPress={() => bottomSheetRef.current?.close()}
-          className="flex-1">
-          <BottomSheet
-            enablePanDownToClose
-            snapPoints={['30%', 450]}
-            containerStyle={{marginHorizontal: 5}}
-            ref={bottomSheetRef}
-            backgroundStyle={{backgroundColor: '#1a1a1a'}}
-            handleIndicatorStyle={{backgroundColor: '#333'}}
-            onClose={() => setModal(false)}>
-            <Pressable className="flex-1" onPress={e => e.stopPropagation()}>
-              <Text className="text-white text-xl p-1 font-semibold text-center">
-                {title}
-              </Text>
-              <BottomSheetScrollView
-                style={{padding: 5, marginBottom: 5}}
-                showsVerticalScrollIndicator={false}>
-                {/* FIXED: Use parsedSubtitles.length for checking existence */}
-                {parsedSubtitles.length > 0 && (
-                  <View className="flex-row items-center justify-center gap-x-3 w-full my-5">
-                    <Text
-                      className={'text-lg p-1 font-semibold text-center'}
-                      style={{
-                        color: activeTab === 1 ? primary : 'white',
-                        borderBottomWidth: activeTab === 1 ? 2 : 0,
-                        borderBottomColor:
-                          activeTab === 1 ? 'white' : 'transparent',
+      transparent={true}
+      animationType="fade" // Prevents harsh unmounting visual glitches
+    >
+      <GestureHandlerRootView style={StyleSheet.absoluteFillObject}>
+        {/* FIX: Removed the buggy <Pressable> wrapper and added backdropComponent */}
+        <BottomSheet
+          enablePanDownToClose
+          snapPoints={['30%', 450]}
+          containerStyle={{marginHorizontal: 5}}
+          ref={bottomSheetRef}
+          backgroundStyle={{backgroundColor: '#1a1a1a'}}
+          handleIndicatorStyle={{backgroundColor: '#333'}}
+          backdropComponent={renderBackdrop}
+          onClose={() => setModal(false)}>
+          <Text className="text-white text-xl p-1 font-semibold text-center">
+            {title}
+          </Text>
+          <BottomSheetScrollView
+            style={{padding: 5, marginBottom: 5}}
+            showsVerticalScrollIndicator={false}>
+            {parsedSubtitles.length > 0 && (
+              <View className="flex-row items-center justify-center gap-x-3 w-full my-5">
+                <Text
+                  className={'text-lg p-1 font-semibold text-center'}
+                  style={{
+                    color: activeTab === 1 ? primary : 'white',
+                    borderBottomWidth: activeTab === 1 ? 2 : 0,
+                    borderBottomColor:
+                      activeTab === 1 ? 'white' : 'transparent',
+                  }}
+                  onPress={() => setActiveTab(1)}>
+                  Video
+                </Text>
+                <Text
+                  className={'text-lg p-1 font-semibold text-center'}
+                  style={{
+                    color: activeTab === 2 ? primary : 'white',
+                    borderBottomWidth: activeTab === 2 ? 2 : 0,
+                    borderBottomColor:
+                      activeTab === 2 ? 'white' : 'transparent',
+                  }}
+                  onPress={() => setActiveTab(2)}>
+                  Subtitle
+                </Text>
+              </View>
+            )}
+            {loading
+              ? Array.from({length: 4}).map((_, index) => (
+                  <SkeletonLoader
+                    key={index}
+                    width={Dimensions.get('window').width - 30}
+                    height={35}
+                    marginVertical={5}
+                  />
+                ))
+              : activeTab === 1
+                ? data.map(item => (
+                    <TouchableOpacity
+                      className="p-2 bg-white/30 rounded-md my-1"
+                      key={item.link}
+                      onLongPress={() => {
+                        if (settingsStorage.isHapticFeedbackEnabled()) {
+                          RNReactNativeHapticFeedback.trigger('effectTick', {
+                            enableVibrateFallback: true,
+                            ignoreAndroidSystemSettings: false,
+                          });
+                        }
+                        Clipboard.setString(item.link);
+                        ToastAndroid.show('Link copied', ToastAndroid.SHORT);
                       }}
-                      onPress={() => setActiveTab(1)}>
-                      Video
-                    </Text>
-                    <Text
-                      className={'text-lg p-1 font-semibold text-center'}
-                      style={{
-                        color: activeTab === 2 ? primary : 'white',
-                        borderBottomWidth: activeTab === 2 ? 2 : 0,
-                        borderBottomColor:
-                          activeTab === 2 ? 'white' : 'transparent',
-                      }}
-                      onPress={() => setActiveTab(2)}>
-                      Subtitle
-                    </Text>
-                  </View>
-                )}
-                {loading
-                  ? Array.from({length: 4}).map((_, index) => (
-                      <SkeletonLoader
-                        key={index}
-                        width={Dimensions.get('window').width - 30}
-                        height={35}
-                        marginVertical={5}
-                      />
-                    ))
-                  : activeTab === 1
-                  ? data.map(item => (
-                      <TouchableOpacity
-                        className="p-2 bg-white/30 rounded-md my-1"
-                        key={item.link}
-                        onLongPress={() => {
-                          if (settingsStorage.isHapticFeedbackEnabled()) {
-                            RNReactNativeHapticFeedback.trigger('effectTick', {
-                              enableVibrateFallback: true,
-                              ignoreAndroidSystemSettings: false,
-                            });
-                          }
-                          Clipboard.setString(item.link);
-                          ToastAndroid.show('Link copied', ToastAndroid.SHORT);
-                        }}
-                        onPress={() => handlePressVideo(item)}>
-                        <Text style={{color: 'white'}}>{item.server}</Text>
-                      </TouchableOpacity>
-                    ))
-                  : /* FIXED: Map directly over the flattened parsedSubtitles array */
-                  parsedSubtitles.length > 0
+                      onPress={() => handlePressVideo(item)}>
+                      <Text style={{color: 'white'}}>{item.server}</Text>
+                    </TouchableOpacity>
+                  ))
+                : parsedSubtitles.length > 0
                   ? parsedSubtitles.map((item, index) => (
                       <TouchableOpacity
                         className="p-2 bg-white/30 rounded-md my-1"
@@ -209,15 +227,13 @@ const DownloadBottomSheet = ({
                       </TouchableOpacity>
                     ))
                   : null}
-                {data.length === 0 && !loading && (
-                  <Text className="text-red-500 text-lg text-center">
-                    No server found
-                  </Text>
-                )}
-              </BottomSheetScrollView>
-            </Pressable>
-          </BottomSheet>
-        </Pressable>
+            {data.length === 0 && !loading && (
+              <Text className="text-red-500 text-lg text-center">
+                No server found
+              </Text>
+            )}
+          </BottomSheetScrollView>
+        </BottomSheet>
       </GestureHandlerRootView>
     </Modal>
   );

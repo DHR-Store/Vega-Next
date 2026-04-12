@@ -3,9 +3,10 @@
     "name": "Vega-Next",
     "displayName": "Vega-Next",
     "slug": "vega-next",
-    "version": "3.4.2",
-    "sdkVersion": "52.0.0",
+    "version": "3.5.4",
+    "sdkVersion": "54.0.0",
     "newArchEnabled": true,
+    "jsEngine": "hermes",
     "userInterfaceStyle": "dark",
     "autolinking": {
       "exclude": [
@@ -32,11 +33,25 @@
         }
       ],
       [
+        "react-native-video",
+        {
+          "enableNotificationControls": true,
+          "enableAndroidPictureInPicture": true,
+          "androidExtensions": {
+            "useExoplayerRtsp": false,
+            "useExoplayerSmoothStreaming": true,
+            "useExoplayerHls": true,
+            "useExoplayerDash": true
+          }
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {
             "extraMavenRepos": [
-              "../../node_modules/@notifee/react-native/android/libs"
+              "../../node_modules/@notifee/react-native/android/libs",
+              "https://jitpack.io"
             ],
             "enableProguardInReleaseBuilds": true,
             "splits": {
@@ -89,25 +104,9 @@
         "READ_EXTERNAL_STORAGE",
         "READ_MEDIA_VIDEO",
         "WRITE_EXTERNAL_STORAGE",
-        "WRITE_SETTINGS",
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "INTERNET",
-        "MANAGE_EXTERNAL_STORAGE",
-        "READ_EXTERNAL_STORAGE",
-        "READ_MEDIA_VIDEO",
-        "WRITE_EXTERNAL_STORAGE",
         "WRITE_SETTINGS"
       ],
       "manifestPermissions": [
-        {
-          "name": "READ_EXTERNAL_STORAGE",
-          "maxSdkVersion": 32
-        },
-        {
-          "name": "WRITE_EXTERNAL_STORAGE",
-          "maxSdkVersion": 32
-        },
         {
           "name": "READ_EXTERNAL_STORAGE",
           "maxSdkVersion": 32
@@ -127,24 +126,6 @@
         }
       ],
       "queries": [
-        {
-          "action": "VIEW",
-          "data": {
-            "scheme": "http"
-          }
-        },
-        {
-          "action": "VIEW",
-          "data": {
-            "scheme": "https"
-          }
-        },
-        {
-          "action": "VIEW",
-          "data": {
-            "scheme": "vlc"
-          }
-        },
         {
           "action": "VIEW",
           "data": {
@@ -187,6 +168,10 @@
     },
     "owner": "kalipusur",
     "runtimeVersion": "1.0.0",
-    "ios": {}
+    "ios": {
+      "infoPlist": {
+        "CADisableMinimumFrameDurationOnPhone": true
+      }
+    }
   }
 }

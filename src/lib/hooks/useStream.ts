@@ -142,7 +142,7 @@ export const useStream = ({
         }
       }
 
-      // Extract external subtitles (existing logic)
+      // Extract external subtitles
       const subs: any[] = [];
       streamData.forEach(track => {
         if (track?.subtitles?.length && track.subtitles.length > 0) {
@@ -153,8 +153,7 @@ export const useStream = ({
     }
   }, [streamData]);
 
-
-  // Handle errors (existing logic)
+  // Handle errors
   useEffect(() => {
     if (error) {
       console.error('Stream fetch error:', error);
@@ -169,8 +168,7 @@ export const useStream = ({
         (s) => s.link === selectedStream.link && s.server === selectedStream.server,
       );
       
-      // We need to handle the hubcloud skip here too, just in case the streamData list has 
-      // other 'hubcloud' entries further down.
+      // Handle the hubcloud skip here too
       let nextIndex = currentIndex + 1;
       let nextStream = streamData[nextIndex];
       let skippedHubcloud = false;
@@ -205,17 +203,6 @@ export const useStream = ({
     return false;
   };
 
-  // 2. Auto-skip to next stream if selected stream link doesn't load within 10 seconds
-  // This requires an external mechanism (like a video player's state/events) 
-  // to call a function when the video fails to load, but we can simulate the 10-second skip
-  // based on an external trigger for the *currently selected* stream.
-
-  // NOTE: The request mentions "if any server not provide data within 10 second then auto skip ton next server".
-  // The first part of the `queryFn` already handles the fetch timeout. 
-  // This second part likely refers to the video player failing to load the *selected stream link* in time. 
-  // Since we don't have the player's events here, I'll provide a hook's return value 
-  // to be used by the component (e.g., the video player) to signal a timeout/failure.
-
   /**
    * Public function to be called when the selected stream fails to load 
    * (e.g., a 10-second timeout on the video player)
@@ -232,7 +219,6 @@ export const useStream = ({
     return false;
   };
 
-
   return {
     streamData,
     selectedStream,
@@ -242,11 +228,11 @@ export const useStream = ({
     isLoading,
     error,
     refetch,
-    switchToNextStream: handleStreamLoadFailure, // Renamed to reflect its new use for external call
+    switchToNextStream: handleStreamLoadFailure,
   };
 };
 
-// Hook for managing video tracks and settings (Unchanged)
+// Hook for managing video tracks and settings
 export const useVideoSettings = () => {
   const [audioTracks, setAudioTracks] = useState<any[]>([]);
   const [textTracks, setTextTracks] = useState<any[]>([]);
@@ -256,17 +242,31 @@ export const useVideoSettings = () => {
   const [selectedTextTrackIndex, setSelectedTextTrackIndex] = useState(1000);
   const [selectedQualityIndex, setSelectedQualityIndex] = useState(1000);
 
+  // RESTORED: Proper logic for react-native-video to handle active/selected states
   const processAudioTracks = (tracks: any[]) => {
     const uniqueMap = new Map();
-    const uniqueTracks = tracks.filter(track => {
+    tracks.forEach(track => {
       const key = `${track.type}-${track.title}-${track.language}`;
-      if (!uniqueMap.has(key)) {
-        uniqueMap.set(key, true);
-        return true;
+      const existingTrack = uniqueMap.get(key);
+
+      if (!existingTrack) {
+        uniqueMap.set(key, track);
+        return;
       }
-      return false;
+
+      // If the newly iterated track is active, ensure our unified track map reflects that
+      if (track.selected && !existingTrack.selected) {
+        uniqueMap.set(key, {...existingTrack, ...track, selected: true});
+      }
     });
+
+    const uniqueTracks = Array.from(uniqueMap.values());
+    const selectedIndex = uniqueTracks.findIndex(track => track.selected);
+
     setAudioTracks(uniqueTracks);
+    if (selectedIndex !== -1) {
+      setSelectedAudioTrackIndex(selectedIndex);
+    }
   };
 
   const processVideoTracks = (tracks: any[]) => {

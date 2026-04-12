@@ -1,14 +1,15 @@
+// screens/settings/Downloads.tsx
 import {View, Text, Image, Platform, TouchableOpacity} from 'react-native';
 import requestStoragePermission from '../../lib/file/getStoragePermission';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import {downloadFolder} from '../../lib/constants';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import React, {useState, useEffect, useCallback, useMemo} from 'react';
-// ASSUMED FIX: Ensure downloadsStorage is imported correctly
-import {settingsStorage, downloadsStorage} from '../../lib/entstore';
+// FIXED: Correct import path for storage modules
+import {settingsStorage, downloadsStorage} from '../../lib/storage';
 import useThemeStore from '../../lib/zustand/themeStore';
 import * as RNFS from '@dr.pogodin/react-native-fs';
-// ICON LIBRARY: MaterialCommunityIcons is imported from @expo/vector-icons
+// ICON LIBRARY: MaterialCommunityIcons from @expo/vector-icons
 import {MaterialCommunityIcons} from '@expo/vector-icons';
 import {useNavigation, useFocusEffect} from '@react-navigation/native';
 import {NativeStackNavigationProp} from '../../App';
@@ -45,12 +46,12 @@ interface MediaItem {
 
 // Function to extract a readable title from the filename
 const getReadableTitle = (fileName: string): string => {
-  let title = fileName; // 1. Remove Extension
-
-  title = title.replace(/\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v)$/i, ''); // 2. Replace common separators with spaces
-
-  title = title.replace(/[\._-]/g, ' ').replace(/\s{2,}/g, ' '); // 3. Trim extra whitespace
-
+  let title = fileName;
+  // 1. Remove Extension
+  title = title.replace(/\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v)$/i, '');
+  // 2. Replace common separators with spaces
+  title = title.replace(/[\._-]/g, ' ').replace(/\s{2,}/g, ' ');
+  // 3. Trim extra whitespace
   return title.trim();
 };
 
@@ -62,24 +63,24 @@ const getEpisodeInfo = (
   let match = fileName.match(/s(\d{1,3})e(\d{1,3})/i);
   if (match) {
     return {season: parseInt(match[1], 10), episode: parseInt(match[2], 10)};
-  } // Try "Episode Y" or "Ep Y"
-
+  }
+  // Try "Episode Y" or "Ep Y"
   match = fileName.match(/(?:episode|ep)[\s._-]*(\d{1,3})/i);
   if (match) {
     let seasonMatch = fileName.match(/season[\s._-]*(\d{1,3})/i);
     const season = seasonMatch ? parseInt(seasonMatch[1], 10) : 1;
     return {season, episode: parseInt(match[1], 10)};
-  } // Try finding a number at the end, often used for single-digit episode
-
+  }
+  // Try finding a number at the end, often used for single-digit episode
   match = fileName.match(/[\s._-](\d{1,3})[\s._-]*$/);
   if (match) {
     return {season: 1, episode: parseInt(match[1], 10)};
-  } // Default case
-
+  }
+  // Default case
   return {season: 0, episode: 0}; // Use 0 for "not an episode"
 };
 
-// Assuming RootStackParamList is defined elsewhere, but using a placeholder here
+// Assuming RootStackParamList is defined elsewhere
 type RootStackParamList = {
   Player: {
     episodeList: {title: string; link: string}[];
@@ -100,12 +101,11 @@ const Downloads = () => {
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
-  // NEW: State to manage the visual dimming effect during deletion
+  // State to manage the visual dimming effect during deletion
   const [isDeleting, setIsDeleting] = useState(false);
 
   const {primary} = useThemeStore(state => state);
   // groupSelected now tracks selected individual file URIs (can include external URIs)
-
   const [groupSelected, setGroupSelected] = useState<string[]>([]);
   const [isSelecting, setIsSelecting] = useState(false);
 
@@ -150,21 +150,18 @@ const Downloads = () => {
         );
 
         const validFiles = filesInfo.filter((f): f is MediaItem => f !== null);
-        // Save managed files (already exists)
-
         downloadsStorage.saveFilesInfo(validFiles);
         setDownloadFiles(validFiles);
       } catch (error) {
         console.error('Error reading managed files:', error);
-        setDownloadFiles([]); // Clear if read fails
+        setDownloadFiles([]);
       }
     } else {
-      setDownloadFiles([]); // Clear if permission denied
+      setDownloadFiles([]);
     }
 
     // --- 2. Load External File References from Storage (Persistence) ---
     try {
-      // FIX: Ensure correct use of await for the now-async storage function
       const persistedExternal = await downloadsStorage.getExternalFiles();
       setExternalFiles(persistedExternal);
     } catch (error) {
@@ -181,7 +178,7 @@ const Downloads = () => {
       return () => {
         setGroupSelected([]);
         setIsSelecting(false);
-        setIsDeleting(false); // Reset deletion state on blur
+        setIsDeleting(false);
       };
     }, [getFiles]),
   );
@@ -204,8 +201,9 @@ const Downloads = () => {
     } catch (error) {
       return null;
     }
-  } // Generate and cache thumbnails
+  }
 
+  // Generate and cache thumbnails
   useEffect(() => {
     const getThumbnails = async () => {
       const cachedThumbnails = downloadsStorage.getThumbnails() || {};
@@ -244,9 +242,9 @@ const Downloads = () => {
   const handleSelectExternal = useCallback(async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'video/*', // Restricts selection to video MIME types
-        copyToCacheDirectory: false, // Important: avoids copying large external files to cache
-        multiple: true, // Allows selection of many video files
+        type: 'video/*',
+        copyToCacheDirectory: false,
+        multiple: true,
       });
 
       if (result.canceled) {
@@ -269,7 +267,7 @@ const Downloads = () => {
               uri: asset.uri,
               title: getReadableTitle(asset.name),
               size: asset.size || 0,
-              isManagedDownload: false, // External file reference
+              isManagedDownload: false,
             });
           }
         }
@@ -278,7 +276,6 @@ const Downloads = () => {
       if (newSelectedFiles.length > 0) {
         setExternalFiles(prev => {
           const updatedList = [...newSelectedFiles, ...prev];
-          // FIX: Add defensive check to prevent crash if function is still undefined
           if (downloadsStorage.saveExternalFiles) {
             downloadsStorage.saveExternalFiles(updatedList);
           }
@@ -286,7 +283,6 @@ const Downloads = () => {
         });
         RNReactNativeHapticFeedback.trigger('notificationSuccess');
       } else if (result.assets.length > 0) {
-        // Selected files but they were all duplicates or didn't exist
         RNReactNativeHapticFeedback.trigger('notificationWarning');
       }
     } catch (error) {
@@ -306,7 +302,6 @@ const Downloads = () => {
     RNReactNativeHapticFeedback.trigger('impactMedium');
 
     // Introduce a slight artificial delay to allow the visual dimming to register
-    // before the items are removed from the list.
     await new Promise(resolve => setTimeout(resolve, 200));
 
     try {
@@ -327,7 +322,6 @@ const Downloads = () => {
                 ? fileUri.replace('file://', '')
                 : fileUri;
 
-            // RNFS.unlink is used for deletion in the managed folder
             await RNFS.unlink(path);
           } catch (error) {
             console.error(`Error deleting managed file ${fileUri}.`, error);
@@ -347,7 +341,6 @@ const Downloads = () => {
         file => !externalUrisToExclude.includes(file.uri),
       );
       setExternalFiles(newExternalFiles);
-      // FIX: Add defensive check to prevent crash if function is still undefined
       if (downloadsStorage.saveExternalFiles) {
         downloadsStorage.saveExternalFiles(newExternalFiles);
       }
@@ -365,18 +358,15 @@ const Downloads = () => {
       RNReactNativeHapticFeedback.trigger('notificationSuccess');
     } catch (error) {
       console.error('Overall error deleting files:', error);
-      setIsDeleting(false); // Ensure state resets on error
+      setIsDeleting(false);
       RNReactNativeHapticFeedback.trigger('notificationError');
     }
   };
 
   // Combined list for rendering (Downloads + External Selections)
   const allMediaItems: MediaItem[] = useMemo(() => {
-    // Ensure external files are marked correctly
     const external = externalFiles.map(f => ({...f, isManagedDownload: false}));
-    // Ensure download files are marked correctly
     const downloads = downloadFiles.map(f => ({...f, isManagedDownload: true}));
-    // Display downloads first, then external files
     return [...downloads, ...external];
   }, [downloadFiles, externalFiles]);
 
@@ -404,8 +394,6 @@ const Downloads = () => {
     if (isSelecting) {
       toggleSelection(item.uri);
     } else {
-      // If it's a file URI (local download), prepend file:// if necessary
-      // If it's a content URI (external selection), use it directly
       const directUrl =
         item.uri.startsWith('file://') || item.uri.startsWith('content://')
           ? item.uri
@@ -428,7 +416,6 @@ const Downloads = () => {
       <View className="flex-row justify-between items-center mb-4">
         <Text className="text-2xl text-white">Downloads</Text>
         <View className="flex-row gap-x-7 items-center">
-          {/* Button calls the real file picker using expo-document-picker */}
           {!isSelecting && (
             <TouchableOpacity onPress={handleSelectExternal} className="p-1">
               <MaterialCommunityIcons
@@ -444,7 +431,7 @@ const Downloads = () => {
               onPress={() => {
                 setGroupSelected([]);
                 setIsSelecting(false);
-                setIsDeleting(false); // Ensure deletion state is off when canceling
+                setIsDeleting(false);
               }}>
               <MaterialCommunityIcons name="close" size={28} color={primary} />
             </TouchableOpacity>
@@ -477,7 +464,6 @@ const Downloads = () => {
         }
         renderItem={({item}) => {
           const isSelected = isSelecting && groupSelected.includes(item.uri);
-          // NEW: Check if this item is selected AND we are in the deletion phase
           const isDimmingForDeletion = isDeleting && isSelected;
 
           const fileName = item.uri.split('/').pop() || '';
@@ -488,10 +474,9 @@ const Downloads = () => {
           return (
             <TouchableOpacity
               key={item.uri}
-              // Use an array for style to combine dynamic border and the new opacity effect
               style={[
                 {borderColor: isSelected ? primary : 'transparent'},
-                isDimmingForDeletion && {opacity: 0.3}, // Dim selected items briefly during delete action
+                isDimmingForDeletion && {opacity: 0.3},
               ]}
               className={`flex-1 m-0.5 rounded-lg overflow-hidden border-2 ${
                 isSelected
@@ -509,18 +494,16 @@ const Downloads = () => {
               <View className="relative aspect-[2/3]">
                 {/* THUMBNAIL RENDERING LOGIC */}
                 {thumbnails[item.uri] ? (
-                  /* Display generated thumbnail */
                   <Image
                     source={{uri: thumbnails[item.uri]}}
                     className="w-full h-full rounded-lg"
                     resizeMode="cover"
                   />
                 ) : (
-                  /* Display fallback icon (since content:// URIs don't support thumbnail generation) */
                   <View className="w-full h-full bg-quaternary rounded-lg justify-center items-center">
                     <MaterialCommunityIcons
-                      /* Different icons for managed vs. external files */
-                      name={item.isManagedDownload ? 'movie-roll' : 'video-box'}
+                      // FIXED: Use valid icon names from MaterialCommunityIcons
+                      name={item.isManagedDownload ? 'filmstrip' : 'video'}
                       size={40}
                       color="gray"
                     />
@@ -530,7 +513,6 @@ const Downloads = () => {
                 {/* EPISODE NUMBER CIRCLE */}
                 {isEpisode && (
                   <View
-                    // FIX: Using 'style' for the dynamic border color
                     style={{borderColor: primary}}
                     className={`absolute top-1 left-1 bg-black/70 rounded-full w-8 h-8 justify-center items-center border`}>
                     <Text className="text-white text-xs font-bold">
@@ -541,8 +523,7 @@ const Downloads = () => {
 
                 {/* EXTERNAL FILE BADGE */}
                 {!item.isManagedDownload && (
-                  <View
-                    className={`absolute top-1 right-1 bg-purple-700/70 rounded-full px-2 py-0.5 justify-center items-center border border-purple-500`}>
+                  <View className="absolute top-1 right-1 bg-purple-700/70 rounded-full px-2 py-0.5 justify-center items-center border border-purple-500">
                     <Text className="text-white text-[10px] font-bold">
                       EXTERNAL
                     </Text>

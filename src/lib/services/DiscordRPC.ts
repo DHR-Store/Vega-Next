@@ -11,7 +11,7 @@ class DiscordRPCService {
   private readonly APP_ID = 'YOUR_DISCORD_APP_ID';
   
   // 🔴 Your Webhook URL
-  private readonly WEBHOOK_URL = 'YOUR_DISCORD webhook URL';
+  private readonly WEBHOOK_URL = 'YOUR_WEBHOOK_URL';
 
   private pendingPresence: {
     title: string;
@@ -206,8 +206,8 @@ class DiscordRPCService {
       application_id: this.APP_ID,
     };
 
-    const VEGA_ICON_ASSET_ID = 'YOUR_VEGA_ICON_ASSET_ID';
-    let largeImageId = 'YOUR_LARGE_IMAGE_ASSET_ID'; // Default fallback
+    const VEGA_ICON_ASSET_ID = '1488247100549365781';
+    let largeImageId = '1488154301208465508'; // Default fallback
 
     // Pass the raw image URL to our Webhook Proxy to get a Discord-approved link
     if (typeof posterUrl === 'string' && posterUrl.startsWith('http')) {

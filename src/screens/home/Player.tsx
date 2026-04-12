@@ -1190,9 +1190,8 @@ const Player = ({route}: Props): React.JSX.Element => {
 
   const isFastForwardingRef = useRef(false);
   const [isFastForwarding, setIsFastForwarding] = useState(false);
-  const [fastForwardRate, setLocalFastForwardRateState] = useState(
-    getFastForwardRate(),
-  );
+  const [fastForwardRate, setLocalFastForwardRateState] =
+    useState(getFastForwardRate());
 
   const setSkipDuration = useCallback((duration: number) => {
     setSkipDurationState(duration);
@@ -1324,10 +1323,11 @@ const Player = ({route}: Props): React.JSX.Element => {
 
   // ── FIX: Throttled UI state updates – only every 2 seconds for the Next Episode
   //         button. This prevents videoPlayerProps from recomputing every 500ms.
+  // Throttled UI state updates – every 500ms for responsive Next/Previous buttons.
   useEffect(() => {
     const id = setInterval(() => {
       setVideoCurrentTime(videoCurrentTimeRef.current);
-    }, 2000);
+    }, 500);
     return () => clearInterval(id);
   }, []);
 
@@ -2214,6 +2214,25 @@ const Player = ({route}: Props): React.JSX.Element => {
           <Animated.View
             style={[lockButtonStyle]}
             className="absolute top-5 right-5 flex-row items-center gap-4 z-50">
+            {/* Episode button (new) – shown when episode list is available */}
+            {route.params?.episodeList &&
+              activeEpisode &&
+              route.params.episodeList.findIndex(
+                e => e.link === activeEpisode.link,
+              ) !== -1 &&
+              route.params.episodeList.findIndex(
+                e => e.link === activeEpisode.link,
+              ) <
+                route.params.episodeList.length - 1 &&
+              videoDuration > 0 &&
+              videoCurrentTime / videoDuration > 0.6 && (
+                <TouchableOpacity
+                  className="flex-row items-center opacity-60"
+                  onPress={handleNextEpisode}>
+                  <Text className="text-white text-base">Next</Text>
+                  <MaterialIcons name="skip-next" size={28} color="white" />
+                </TouchableOpacity>
+              )}
             <TouchableOpacity
               onPress={() => {
                 setActiveTab('general');
@@ -2381,46 +2400,14 @@ const Player = ({route}: Props): React.JSX.Element => {
                 {resizeMode === ResizeMode.NONE
                   ? 'Fit'
                   : resizeMode === ResizeMode.COVER
-                  ? 'Cover'
-                  : resizeMode === ResizeMode.STRETCH
-                  ? 'Stretch'
-                  : 'Contain'}
+                    ? 'Cover'
+                    : resizeMode === ResizeMode.STRETCH
+                      ? 'Stretch'
+                      : 'Contain'}
               </Text>
             </TouchableOpacity>
 
             {/* ── NEW: Episodes button – shows episode panel without closing player */}
-            {route.params?.episodeList &&
-              route.params.episodeList.length > 1 && (
-                <TouchableOpacity
-                  className="flex-row gap-1 items-center opacity-60"
-                  onPress={() => setShowEpisodePanel(true)}>
-                  <MaterialIcons
-                    name="queue-play-next"
-                    size={24}
-                    color="white"
-                  />
-                  <Text className="text-white text-xs">Episodes</Text>
-                </TouchableOpacity>
-              )}
-
-            {route.params?.episodeList &&
-              activeEpisode &&
-              route.params.episodeList.findIndex(
-                e => e.link === activeEpisode.link,
-              ) !== -1 &&
-              route.params.episodeList.findIndex(
-                e => e.link === activeEpisode.link,
-              ) <
-                route.params.episodeList.length - 1 &&
-              videoDuration > 0 &&
-              videoCurrentTime / videoDuration > 0.7 && (
-                <TouchableOpacity
-                  className="flex-row items-center opacity-60"
-                  onPress={handleNextEpisode}>
-                  <Text className="text-white text-base">Next</Text>
-                  <MaterialIcons name="skip-next" size={28} color="white" />
-                </TouchableOpacity>
-              )}
           </Animated.View>
         )}
       </View>

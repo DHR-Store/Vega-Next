@@ -12,8 +12,8 @@ import {
   ToastAndroid,
   Modal,
   Image,
-  SafeAreaView,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import React, {useCallback, useMemo, useEffect, useState, useRef} from 'react';
 import {
@@ -37,6 +37,7 @@ import {
   AntDesign,
   Feather,
   MaterialIcons,
+  FontAwesome5, // Added explicitly for Discord
 } from '@expo/vector-icons';
 import useThemeStore from '../../lib/zustand/themeStore';
 import useWatchHistoryStore from '../../lib/zustand/watchHistrory';
@@ -49,11 +50,22 @@ import {MMKV} from '../../lib/Mmkv';
 import {DiscordRPC} from '../../lib/services/DiscordRPC';
 import {WebView} from 'react-native-webview';
 import {userSession, User} from '../../lib/services/login';
-import Login from '../../screens/Login';
 import {DeviceEventEmitter} from 'react-native';
 import ProfileAvatar from '../../screens/Profileavatar';
 
 type Props = NativeStackScreenProps<SettingsStackParamList, 'Settings'>;
+
+// Helper for cross‑platform toasts
+const showToast = (message: string, duration: 'short' | 'long' = 'short') => {
+  if (Platform.OS === 'android') {
+    ToastAndroid.show(
+      message,
+      duration === 'short' ? ToastAndroid.SHORT : ToastAndroid.LONG,
+    );
+  } else {
+    alert(message);
+  }
+};
 
 // Notification permission component
 const NotificationPrompt = () => {
@@ -208,7 +220,7 @@ const ExternalLinkRow = React.memo(
   ),
 );
 
-// Simple Wrapper to replace AnimatedSection
+// Simple Wrapper
 const Section = ({children}: {children: React.ReactNode}) => (
   <View>{children}</View>
 );
@@ -245,7 +257,6 @@ const Settings = ({navigation}: Props) => {
 
     loadUser();
 
-    // Listen for login events from the Login screen
     const loginSubscription = DeviceEventEmitter.addListener(
       'userLoggedIn',
       loadUser,
@@ -254,7 +265,6 @@ const Settings = ({navigation}: Props) => {
       'userLoggedOut',
       loadUser,
     );
-    // Add photo change listener
     const photoSubscription = DeviceEventEmitter.addListener(
       'profilePhotoChanged',
       loadUser,
@@ -279,7 +289,6 @@ const Settings = ({navigation}: Props) => {
   const [isDiscordConnected, setIsDiscordConnected] = useState(false);
   const [showDiscordLogin, setShowDiscordLogin] = useState(false);
 
-  // Store the user's profile info
   const [discordUser, setDiscordUser] = useState<{
     username: string;
     avatarUrl: string;
@@ -287,11 +296,8 @@ const Settings = ({navigation}: Props) => {
 
   const webViewRef = useRef<any>(null);
 
-  // THE FIX: This script intercepts the raw network request during login
-  // and intercepts localStorage being set, guaranteeing we catch the token.
   const injectedScript = `
     (function() {
-      // 1. Intercept Network Requests (Catches the login API response)
       var originalXHR = window.XMLHttpRequest.prototype.open;
       var originalSend = window.XMLHttpRequest.prototype.send;
       
@@ -314,7 +320,6 @@ const Settings = ({navigation}: Props) => {
           return originalSend.apply(this, arguments);
       };
 
-      // 2. Intercept LocalStorage (Catches the exact moment Discord saves the token)
       var originalSetItem = window.localStorage.setItem;
       window.localStorage.setItem = function(key, value) {
           if (key === 'token' && value && value !== 'null') {
@@ -323,7 +328,6 @@ const Settings = ({navigation}: Props) => {
           originalSetItem.apply(this, arguments);
       };
 
-      // 3. Fallback: The classic beforeunload trigger
       setInterval(function() {
           try {
               window.dispatchEvent(new Event('beforeunload'));
@@ -337,22 +341,18 @@ const Settings = ({navigation}: Props) => {
     true;
   `;
 
-  // Function to fetch user info from Discord using the token
   const fetchDiscordUser = async (token: string) => {
     try {
+      const cleanToken = token.replace(/^Bearer\s+/i, '');
       const res = await fetch('https://discord.com/api/v10/users/@me', {
-        headers: {Authorization: token},
+        headers: {Authorization: `Bearer ${cleanToken}`},
       });
       if (res.ok) {
         const data = await res.json();
-
-        // FIXED: Removed all the \ characters from the template strings
+        const defaultAvatarNumber = data.id ? (BigInt(data.id) >> 22n) % 6n : 0;
         const avatarUrl = data.avatar
           ? `https://cdn.discordapp.com/avatars/${data.id}/${data.avatar}.png`
-          : `https://cdn.discordapp.com/embed/avatars/${
-              parseInt(data.discriminator || '0') % 5
-            }.png`;
-
+          : `https://cdn.discordapp.com/embed/avatars/${defaultAvatarNumber}.png`;
         setDiscordUser({
           username: data.global_name || data.username,
           avatarUrl,
@@ -370,7 +370,7 @@ const Settings = ({navigation}: Props) => {
   }, [discordToken]);
   // ==========================================
 
-  // Add this near your other state variables
+  // YouTube states
   const [ytProfilePic, setYtProfilePic] = useState<string | null>(
     MMKV.getString('ytProfilePic') || null,
   );
@@ -378,9 +378,9 @@ const Settings = ({navigation}: Props) => {
   const [isWebViewReady, setIsWebViewReady] = useState(false);
 
   const closeYouTubeLogin = () => {
-    setIsWebViewReady(false); // 1. Unmount the WebView safely first
+    setIsWebViewReady(false);
     setTimeout(() => {
-      setIsYTLoginVisible(false); // 2. Close the modal after a tiny delay
+      setIsYTLoginVisible(false);
     }, 100);
   };
 
@@ -399,7 +399,6 @@ const Settings = ({navigation}: Props) => {
     [setProvider, tabNavigation, setAppMode],
   );
 
-  // Use getBool from your local wrapper
   const [aiEnabled, setAiEnabled] = useState(
     MMKV.getBool('isAIEnabled') || false,
   );
@@ -407,12 +406,8 @@ const Settings = ({navigation}: Props) => {
   const toggleAiAssistant = useCallback(() => {
     const newState = !aiEnabled;
     setAiEnabled(newState);
-
-    // FIX: Use setBool() instead of set()
     MMKV.setBool('isAIEnabled', newState);
-
     DeviceEventEmitter.emit('toggleAIAssistant', newState);
-
     if (settingsStorage.isHapticFeedbackEnabled()) {
       ReactNativeHapticFeedback.trigger('virtualKey', {
         enableVibrateFallback: true,
@@ -469,7 +464,7 @@ const Settings = ({navigation}: Props) => {
       });
     }
     cacheStorageService.clearAll();
-    ToastAndroid.show('Cache Cleared', ToastAndroid.SHORT);
+    showToast('Cache Cleared');
   }, []);
 
   const clearHistoryHandler = useCallback(() => {
@@ -480,14 +475,13 @@ const Settings = ({navigation}: Props) => {
       });
     }
     clearHistory();
-    ToastAndroid.show('History Cleared', ToastAndroid.SHORT);
+    showToast('History Cleared');
   }, [clearHistory]);
 
   const toggleWatchTogether = useCallback(() => {
     const newState = !watchTogetherMode;
     setWatchTogetherMode(newState);
     setWatchTogetherModeStorage(newState);
-
     if (settingsStorage.isHapticFeedbackEnabled()) {
       ReactNativeHapticFeedback.trigger('virtualKey', {
         enableVibrateFallback: true,
@@ -496,35 +490,27 @@ const Settings = ({navigation}: Props) => {
     }
   }, [watchTogetherMode]);
 
-  // --- PROXY TOGGLE ---
   const toggleNetworkProxy = useCallback(() => {
     const newState = !networkProxyMode;
     setNetworkProxyMode(newState);
     setNetworkProxyModeStorage(newState);
-
     if (settingsStorage.isHapticFeedbackEnabled()) {
       ReactNativeHapticFeedback.trigger('impactMedium', {
         enableVibrateFallback: true,
         ignoreAndroidSystemSettings: false,
       });
     }
-
-    ToastAndroid.show(
-      newState ? 'Secure Proxy Enabled' : 'Secure Proxy Disabled',
-      ToastAndroid.SHORT,
-    );
+    showToast(newState ? 'Secure Proxy Enabled' : 'Secure Proxy Disabled');
   }, [networkProxyMode]);
-  // --------------------
 
   const handleGoogleSignIn = async () => {
     setLoginLoading(true);
     try {
       const user = await userSession.signIn();
       setCurrentUser(user);
-      ToastAndroid.show(`Welcome ${user.name}!`, ToastAndroid.SHORT);
+      showToast(`Welcome ${user.name}!`);
     } catch (err: any) {
-      const message = err?.message ?? 'Sign in failed';
-      ToastAndroid.show(message, ToastAndroid.LONG);
+      showToast(err?.message ?? 'Sign in failed', 'long');
     } finally {
       setLoginLoading(false);
     }
@@ -535,18 +521,16 @@ const Settings = ({navigation}: Props) => {
     try {
       await userSession.signOut();
       setCurrentUser(null);
-      ToastAndroid.show('Signed out', ToastAndroid.SHORT);
+      showToast('Signed out');
     } catch (err) {
-      ToastAndroid.show('Sign out failed', ToastAndroid.SHORT);
+      showToast('Sign out failed');
     } finally {
       setLoginLoading(false);
     }
   };
 
   const parseSyncLink = (link: string) => {
-    // Helper to extract value by key from a complex URL string
     const getParam = (key: string) => {
-      // Matches key=value up to the next & or end of string
       const regex = new RegExp(`${key}=([^&\\n]+)`, 'i');
       const match = link.match(regex);
       return match ? match[1] : null;
@@ -579,17 +563,12 @@ const Settings = ({navigation}: Props) => {
   const handleJoinSession = useCallback(() => {
     const linkToJoin = syncLink.trim();
     if (!linkToJoin) {
-      ToastAndroid.show(
-        'Please paste a sync link to join.',
-        ToastAndroid.SHORT,
-      );
+      showToast('Please paste a sync link to join.');
       return;
     }
 
     const parsedData = parseSyncLink(linkToJoin);
-
     if (parsedData) {
-      // Robust Mock Params for Player
       const mockPlayerParams = {
         id: parsedData.videoId,
         primaryTitle: parsedData.primaryTitle,
@@ -618,18 +597,14 @@ const Settings = ({navigation}: Props) => {
 
       try {
         rootNavigation.navigate('Player' as never, mockPlayerParams as never);
-
         setSyncLink('');
-        ToastAndroid.show(
-          `Joining session at ${parsedData.time}s`,
-          ToastAndroid.LONG,
-        );
+        showToast(`Joining session at ${parsedData.time}s`, 'long');
       } catch (error) {
         console.error('Navigation Crash Error:', error);
-        ToastAndroid.show('Failed to join session.', ToastAndroid.LONG);
+        showToast('Failed to join session.', 'long');
       }
     } else {
-      ToastAndroid.show('Invalid sync link format.', ToastAndroid.LONG);
+      showToast('Invalid sync link format.', 'long');
     }
   }, [syncLink, rootNavigation, provider]);
 
@@ -638,15 +613,12 @@ const Settings = ({navigation}: Props) => {
       const text = await Clipboard.getString();
       if (text && text.includes('video_id=') && text.includes('time=')) {
         setSyncLink(text);
-        ToastAndroid.show(
-          `Pasted link: ${text.substring(0, 30)}...`,
-          ToastAndroid.SHORT,
-        );
+        showToast(`Pasted link: ${text.substring(0, 30)}...`);
       } else {
-        ToastAndroid.show('No valid sync link found.', ToastAndroid.SHORT);
+        showToast('No valid sync link found.');
       }
     } catch (error) {
-      ToastAndroid.show('Failed to read from clipboard.', ToastAndroid.SHORT);
+      showToast('Failed to read from clipboard.');
     }
   }, []);
 
@@ -654,8 +626,7 @@ const Settings = ({navigation}: Props) => {
     <ScrollView
       className="w-full h-full bg-black"
       showsVerticalScrollIndicator={false}
-      overScrollMode="never" // Better visual experience on Android
-      removeClippedSubviews={true} // Performance optimization
+      overScrollMode="never"
       contentContainerStyle={{
         paddingTop: 15,
         paddingBottom: 24,
@@ -666,31 +637,22 @@ const Settings = ({navigation}: Props) => {
           <Text className="text-2xl font-bold text-white mb-6">Settings</Text>
         </View>
 
-        {/* ========== TOP RIGHT ACCOUNT AVATAR ========== */}
-
+        {/* Top right account avatar */}
         <View className="absolute top-4 right-4 z-50">
           {currentUser ? (
-            // LOGGED IN: Container for Avatar and Logout Menu
             <View className="items-end">
-              {/* 1. Clickable Avatar to toggle the menu */}
               <TouchableOpacity
                 onPress={() => setShowLogoutMenu(!showLogoutMenu)}
                 activeOpacity={0.7}>
                 <View pointerEvents="none">
-                  <ProfileAvatar
-                    size={40}
-                    // Disabled so it triggers the menu instead of the photo picker
-                    editable={false}
-                  />
+                  <ProfileAvatar size={40} editable={false} />
                 </View>
               </TouchableOpacity>
-
-              {/* 2. Logout Option Dropdown (Shows when avatar is clicked) */}
               {showLogoutMenu && (
                 <TouchableOpacity
                   onPress={() => {
-                    setShowLogoutMenu(false); // Hide menu
-                    handleSignOut(); // Trigger your sign out function
+                    setShowLogoutMenu(false);
+                    handleSignOut();
                   }}
                   disabled={loginLoading}
                   className="mt-2 bg-[#1A1A1A] border border-[#333] px-4 py-2 rounded-lg shadow-lg flex-row items-center justify-center">
@@ -705,7 +667,6 @@ const Settings = ({navigation}: Props) => {
               )}
             </View>
           ) : (
-            // LOGGED OUT: Navigate to Login.tsx screen
             <TouchableOpacity
               onPress={() => navigation.navigate('Login')}
               className="w-10 h-10 rounded-full bg-white justify-center items-center shadow-md">
@@ -720,6 +681,7 @@ const Settings = ({navigation}: Props) => {
           )}
         </View>
 
+        {/* App Mode */}
         <Section>
           <View className="mb-6 flex-col gap-3">
             <Text className="text-gray-400 text-sm mb-1">App Mode</Text>
@@ -761,7 +723,7 @@ const Settings = ({navigation}: Props) => {
           <NotificationPrompt />
         </Section>
 
-        {/* --- NETWORK / PROXY SECTION --- */}
+        {/* Network & Connection */}
         <Section>
           <View className="mb-6 flex-col gap-3">
             <Text className="text-gray-400 text-sm mb-1">
@@ -795,8 +757,8 @@ const Settings = ({navigation}: Props) => {
             </View>
           </View>
         </Section>
-        {/* ----------------------------------- */}
 
+        {/* Content Provider (only in video mode) */}
         {appMode === 'video' && (
           <Section>
             <View className="mb-6 flex-col gap-3">
@@ -829,16 +791,16 @@ const Settings = ({navigation}: Props) => {
                 <InternalOptionRow
                   icon={<MaterialCommunityIcons name="shield-check-outline" />}
                   text="Provider Checker"
-                  onPress={() => navigation.navigate('ProviderCheck' as any)}
+                  onPress={() => navigation.navigate('ProviderCheck')}
                   primaryColor={primary}
-                  isLast={true} // 👈 This is now the last item
+                  isLast={true}
                 />
               </View>
             </View>
           </Section>
         )}
 
-        {/* Watch Together Section */}
+        {/* Watch Together */}
         <Section>
           <View className="mb-6 flex-col gap-3">
             <Text className="text-gray-400 text-sm mb-1">Watch Together</Text>
@@ -897,18 +859,15 @@ const Settings = ({navigation}: Props) => {
           </View>
         </Section>
 
-        {/* --- DISCORD RPC INTEGRATION UI --- */}
+        {/* Discord RPC Integration UI */}
         <Section>
           <View className="mb-6 flex-col gap-3">
             <Text className="text-gray-400 text-sm mb-1">Integrations</Text>
             <View className="bg-[#1A1A1A] rounded-xl overflow-hidden p-4">
               <View className="flex-row items-center justify-between mb-3">
                 <View className="flex-row items-center">
-                  <MaterialCommunityIcons
-                    name="discord"
-                    size={22}
-                    color="#5865F2"
-                  />
+                  {/* FIXED: Switched MaterialCommunityIcons to FontAwesome5 for discord */}
+                  <FontAwesome5 name="discord" size={22} color="#5865F2" />
                   <Text className="text-white ml-3 text-base font-medium">
                     Discord Rich Presence
                   </Text>
@@ -965,7 +924,7 @@ const Settings = ({navigation}: Props) => {
           </View>
         </Section>
 
-        {/* --- DISCORD LOGIN MODAL --- */}
+        {/* DISCORD LOGIN MODAL */}
         <Modal
           visible={showDiscordLogin}
           animationType="slide"
@@ -1033,16 +992,14 @@ const Settings = ({navigation}: Props) => {
             />
           </View>
         </Modal>
-        {/* ------------------------------- */}
 
-        {/* --- YOUTUBE INTEGRATION (YTPRO) SECTION --- */}
+        {/* YouTube Integration */}
         <Section>
           <View className="mb-6 flex-col gap-3">
             <Text className="text-gray-400 text-sm mb-1">YouTube</Text>
             <View className="bg-[#1A1A1A] rounded-xl overflow-hidden p-4">
               <View className="flex-row items-center justify-between mb-3">
                 <View className="flex-row items-center">
-                  {/* Show Profile Picture if available, otherwise show YouTube Icon */}
                   {ytProfilePic ? (
                     <Image
                       source={{uri: ytProfilePic}}
@@ -1058,18 +1015,12 @@ const Settings = ({navigation}: Props) => {
                   </Text>
                 </View>
 
-                {/* Logout button if profile pic exists */}
                 {ytProfilePic && (
                   <TouchableOpacity
                     onPress={() => {
                       setYtProfilePic(null);
-                      if (typeof MMKV.delete === 'function') {
-                        MMKV.delete('ytProfilePic');
-                      }
-                      ToastAndroid.show(
-                        'Logged out of YouTube Mod',
-                        ToastAndroid.SHORT,
-                      );
+                      MMKV.delete('ytProfilePic');
+                      showToast('Logged out of YouTube Mod');
                     }}>
                     <Text className="text-red-500 text-xs font-bold">
                       Logout
@@ -1079,12 +1030,11 @@ const Settings = ({navigation}: Props) => {
               </View>
 
               <Text className="text-gray-400 text-xs mb-4">
-                Access YouTube with background play, ad-blocking, and media
+                Access YouTube with background play, ad‑blocking, and media
                 extraction powered by YTPRO. Sign in to your account directly.
               </Text>
 
               <View style={{flexDirection: 'row', gap: 10}}>
-                {/* CONDITIONAL RENDERING */}
                 {!ytProfilePic ? (
                   <TouchableOpacity
                     style={{
@@ -1117,7 +1067,7 @@ const Settings = ({navigation}: Props) => {
                       if (settingsStorage.isHapticFeedbackEnabled()) {
                         ReactNativeHapticFeedback.trigger('impactLight');
                       }
-                      navigation.navigate('YTHome' as never);
+                      navigation.navigate('YTHome');
                     }}>
                     <Text className="text-white font-bold">Open YouTube</Text>
                   </TouchableOpacity>
@@ -1126,9 +1076,8 @@ const Settings = ({navigation}: Props) => {
             </View>
           </View>
         </Section>
-        {/* ------------------------------------------- */}
 
-        {/* YOUTUBE LOGIN MODAL */}
+        {/* YouTube Login Modal */}
         <Modal
           visible={isYTLoginVisible}
           animationType="slide"
@@ -1137,7 +1086,6 @@ const Settings = ({navigation}: Props) => {
           onShow={() => setIsWebViewReady(true)}
           onRequestClose={closeYouTubeLogin}>
           <View style={{flex: 1, backgroundColor: 'black'}}>
-            {/* Header */}
             <View
               style={{
                 flexDirection: 'row',
@@ -1157,7 +1105,6 @@ const Settings = ({navigation}: Props) => {
               </Text>
             </View>
 
-            {/* Login WebView (Only renders when Modal is fully open) */}
             {isWebViewReady ? (
               <WebView
                 style={{flex: 1, backgroundColor: 'black', opacity: 0.99}}
@@ -1166,7 +1113,7 @@ const Settings = ({navigation}: Props) => {
                 }}
                 userAgent="Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                 thirdPartyCookiesEnabled={true}
-                sharedCookiesEnabled={true} // <-- IMPORTANT: Shares auth cookies with YTHome
+                sharedCookiesEnabled={true}
                 domStorageEnabled={true}
                 javaScriptEnabled={true}
                 setSupportMultipleWindows={false}
@@ -1176,56 +1123,36 @@ const Settings = ({navigation}: Props) => {
                     const data = JSON.parse(event.nativeEvent.data);
                     if (data.type === 'YT_LOGIN_SUCCESS') {
                       setYtProfilePic(data.pp);
-
-                      if (typeof MMKV.setString === 'function') {
-                        MMKV.setString('ytProfilePic', data.pp);
-                      } else {
-                        MMKV.set('ytProfilePic', data.pp);
-                      }
-
+                      MMKV.setString('ytProfilePic', data.pp);
                       closeYouTubeLogin();
-                      ToastAndroid.show(
-                        'Successfully logged in!',
-                        ToastAndroid.SHORT,
-                      );
+                      showToast('Successfully logged in!');
                     }
                   } catch (e) {
                     console.log('Error parsing WebView message', e);
                   }
                 }}
                 injectedJavaScript={`
-    setInterval(function() {
-      // 1. Prevent running in background hidden iframes
-      if (window !== window.top) return;
-
-      // 2. Only execute on YouTube domains
-      if (window.location.hostname === 'm.youtube.com' || window.location.hostname === 'www.youtube.com') {
-        
-        // 3. Make sure the 'Sign in' button is completely gone. 
-        // If it exists, the user is NOT fully logged in yet.
-        var signInBtn = document.querySelector('a[href*="ServiceLogin"]') || document.querySelector('.ytm-btn-sync');
-        if (signInBtn) return;
-
-        // 4. Find the authenticated profile picture safely
-        var img = document.querySelector('ytm-profile-icon img') || 
-                  document.querySelector('#avatar-btn img');
-        
-        // Ensure it's not a generic grey silhouette avatar
-        if (img && img.src && (img.src.includes('ggpht.com') || img.src.includes('googleusercontent.com'))) {
-          if (!img.src.includes('default_avatar')) {
-             window.ReactNativeWebView.postMessage(JSON.stringify({ 
-               type: 'YT_LOGIN_SUCCESS', 
-               pp: img.src 
-             }));
-          }
-        }
-      }
-    }, 2000); // Check every 2 seconds to allow the page to settle
-    true;
-  `}
+                  setInterval(function() {
+                    if (window !== window.top) return;
+                    if (window.location.hostname === 'm.youtube.com' || window.location.hostname === 'www.youtube.com') {
+                      var signInBtn = document.querySelector('a[href*="ServiceLogin"]') || document.querySelector('.ytm-btn-sync');
+                      if (signInBtn) return;
+                      var img = document.querySelector('ytm-profile-icon img') || 
+                                document.querySelector('#avatar-btn img');
+                      if (img && img.src && (img.src.includes('ggpht.com') || img.src.includes('googleusercontent.com'))) {
+                        if (!img.src.includes('default_avatar')) {
+                          window.ReactNativeWebView.postMessage(JSON.stringify({ 
+                            type: 'YT_LOGIN_SUCCESS', 
+                            pp: img.src 
+                          }));
+                        }
+                      }
+                    }
+                  }, 2000);
+                  true;
+                `}
               />
             ) : (
-              /* Temporary Loading State while Modal animates */
               <View
                 style={{
                   flex: 1,
@@ -1239,6 +1166,7 @@ const Settings = ({navigation}: Props) => {
           </View>
         </Modal>
 
+        {/* Options */}
         <Section>
           <View className="mb-6">
             <Text className="text-gray-400 text-sm mb-3">Options</Text>
@@ -1272,7 +1200,7 @@ const Settings = ({navigation}: Props) => {
           </View>
         </Section>
 
-        {/* Vega-Next AI Section */}
+        {/* Vega‑Next AI */}
         <Section>
           <View className="mb-6 flex-col gap-3">
             <Text className="text-gray-400 text-sm mb-1">Vega-Next AI</Text>
@@ -1302,14 +1230,10 @@ const Settings = ({navigation}: Props) => {
                         alignItems: 'center',
                         justifyContent: 'center',
                         marginVertical: 10,
-
-                        // Shadow (iOS)
                         shadowColor: '#000',
                         shadowOffset: {width: 0, height: 2},
                         shadowOpacity: 0.2,
                         shadowRadius: 3,
-
-                        // Elevation (Android)
                         elevation: 4,
                       }}>
                       <Text
@@ -1336,6 +1260,7 @@ const Settings = ({navigation}: Props) => {
           </View>
         </Section>
 
+        {/* Data Management */}
         <Section>
           <View className="mb-6">
             <Text className="text-gray-400 text-sm mb-3">Data Management</Text>
@@ -1371,6 +1296,7 @@ const Settings = ({navigation}: Props) => {
           </View>
         </Section>
 
+        {/* About */}
         <Section>
           <View className="mb-6">
             <Text className="text-gray-400 text-sm mb-3">About</Text>
@@ -1387,17 +1313,23 @@ const Settings = ({navigation}: Props) => {
                 url="https://github.com/DHR-Store/Vega-Next"
                 iconColor={primary}
               />
+              {/* FIXED: 'infocirlceo' to 'infocircleo' */}
               <ExternalLinkRow
-                icon={<AntDesign name="info" />}
+                icon={<AntDesign name="infocircleo" />}
                 text="Error and Suggestions"
                 url="https://radio-nu-five.vercel.app/"
                 iconColor={primary}
               />
+              {/* FIXED: using MaterialIcons valid name support-agent */}
               <ExternalLinkRow
                 icon={
-                  <AntDesign name="customerservice" size={20} color={primary} />
+                  <MaterialIcons
+                    name="support-agent"
+                    size={20}
+                    color={primary}
+                  />
                 }
-                text="Vega-Next-AI(Help)"
+                text="Vega-Next-AI (Help)"
                 url="https://vega-next-ai.vercel.app/"
                 iconColor={primary}
               />

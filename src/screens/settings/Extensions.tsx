@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useRef, useMemo} from 'react';
+import React, {useState, useEffect, useRef, useMemo, useCallback} from 'react';
 import {
   View,
   Text,
@@ -13,15 +13,14 @@ import {
   ScrollView,
   Modal,
   TouchableWithoutFeedback,
-  Dimensions,
 } from 'react-native';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {SettingsStackParamList} from '../../App';
+// Removed AntDesign, using Feather and Ionicons for stability
 import {
   MaterialCommunityIcons,
   MaterialIcons,
   Feather,
-  AntDesign,
   Ionicons,
 } from '@expo/vector-icons';
 import useThemeStore from '../../lib/zustand/themeStore';
@@ -42,10 +41,8 @@ import RenderProviderFlagIcon from '../../components/RenderProviderFLagIcon';
 type Props = NativeStackScreenProps<SettingsStackParamList, 'Extensions'>;
 
 type TabType = 'installed' | 'available';
-// CategoryType is now dynamic string, but we default to 'All'
 type CategoryType = string;
 
-// Extend the ProviderExtension type locally
 interface ExtendedProvider extends ProviderExtension {
   category?: string;
   genres?: string[];
@@ -62,7 +59,6 @@ const Extensions = ({navigation}: Props) => {
     setAvailableProviders,
   } = useContentStore(state => state);
 
-  // States
   const [activeTab, setActiveTab] = useState<TabType>(
     installedProviders?.length > 0 ? 'installed' : 'available',
   );
@@ -74,16 +70,13 @@ const Extensions = ({navigation}: Props) => {
   const [refreshing, setRefreshing] = useState(false);
   const [isPerformingBulkAction, setIsPerformingBulkAction] = useState(false);
 
-  // Filter States
   const [selectedCategory, setSelectedCategory] = useState<CategoryType>('All');
   const [selectedCountry, setSelectedCountry] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [isCountryModalVisible, setIsCountryModalVisible] = useState(false);
 
-  // Use a ref to track if the component is mounted
   const isMounted = useRef(true);
 
-  // Load providers on component mount
   useEffect(() => {
     isMounted.current = true;
     const initializeExtensions = async () => {
@@ -113,14 +106,14 @@ const Extensions = ({navigation}: Props) => {
     };
   }, []);
 
-  const loadProviders = () => {
+  const loadProviders = useCallback(() => {
     const installed = extensionStorage.getInstalledProviders() || [];
     const available = extensionStorage.getAvailableProviders() || [];
     setInstalledProviders(installed);
     setAvailableProviders(available.filter(item => item && !item.disabled));
-  };
+  }, [setInstalledProviders, setAvailableProviders]);
 
-  const checkForUpdates = async () => {
+  const checkForUpdates = useCallback(async () => {
     try {
       const updates = await updateProvidersService.checkForUpdatesManual();
       if (isMounted.current) {
@@ -129,55 +122,58 @@ const Extensions = ({navigation}: Props) => {
     } catch (error) {
       console.error('Error checking for updates:', error);
     }
-  };
+  }, []);
 
-  const handleUpdateProvider = async (provider: ProviderExtension) => {
-    if (!provider || !provider.value) {
-      Alert.alert('Error', 'Invalid provider data');
-      return;
-    }
+  const handleUpdateProvider = useCallback(
+    async (provider: ProviderExtension) => {
+      if (!provider || !provider.value) {
+        Alert.alert('Error', 'Invalid provider data');
+        return;
+      }
 
-    if (settingsStorage.isHapticFeedbackEnabled()) {
-      ReactNativeHapticFeedback.trigger('effectClick', {
-        enableVibrateFallback: true,
-        ignoreAndroidSystemSettings: false,
-      });
-    }
+      if (settingsStorage.isHapticFeedbackEnabled()) {
+        ReactNativeHapticFeedback.trigger('effectClick', {
+          enableVibrateFallback: true,
+          ignoreAndroidSystemSettings: false,
+        });
+      }
 
-    if (isMounted.current) {
-      setUpdatingProvider(provider.value);
-    }
+      if (isMounted.current) setUpdatingProvider(provider.value);
 
-    try {
-      const success = await updateProvidersService.updateProvider(provider);
-      if (success && isMounted.current) {
-        loadProviders();
-        await checkForUpdates();
+      try {
+        const success = await updateProvidersService.updateProvider(provider);
+        if (success && isMounted.current) {
+          loadProviders();
+          await checkForUpdates();
+          Alert.alert(
+            'Success',
+            `${provider.display_name} has been updated successfully!`,
+          );
 
-        Alert.alert(
-          'Success',
-          `${provider.display_name} has been updated successfully!`,
-        );
-
-        if (activeExtensionProvider?.value === provider.value) {
-          setActiveExtensionProvider(provider);
+          if (activeExtensionProvider?.value === provider.value) {
+            setActiveExtensionProvider(provider);
+          }
+        } else if (isMounted.current) {
+          Alert.alert('Error', 'Failed to update provider. Please try again.');
         }
-      } else if (isMounted.current) {
-        Alert.alert('Error', 'Failed to update provider. Please try again.');
+      } catch (error) {
+        console.error('Update error:', error);
+        if (isMounted.current) {
+          Alert.alert('Error', 'Failed to update provider. Please try again.');
+        }
+      } finally {
+        if (isMounted.current) setUpdatingProvider(null);
       }
-    } catch (error) {
-      console.error('Update error:', error);
-      if (isMounted.current) {
-        Alert.alert('Error', 'Failed to update provider. Please try again.');
-      }
-    } finally {
-      if (isMounted.current) {
-        setUpdatingProvider(null);
-      }
-    }
-  };
+    },
+    [
+      activeExtensionProvider,
+      loadProviders,
+      checkForUpdates,
+      setActiveExtensionProvider,
+    ],
+  );
 
-  const handleTabChange = (tab: TabType) => {
+  const handleTabChange = useCallback((tab: TabType) => {
     if (settingsStorage.isHapticFeedbackEnabled()) {
       ReactNativeHapticFeedback.trigger('effectTick', {
         enableVibrateFallback: true,
@@ -185,9 +181,9 @@ const Extensions = ({navigation}: Props) => {
       });
     }
     setActiveTab(tab);
-  };
+  }, []);
 
-  const handleCategorySelect = (category: CategoryType) => {
+  const handleCategorySelect = useCallback((category: CategoryType) => {
     if (settingsStorage.isHapticFeedbackEnabled()) {
       ReactNativeHapticFeedback.trigger('effectTick', {
         enableVibrateFallback: true,
@@ -195,116 +191,116 @@ const Extensions = ({navigation}: Props) => {
       });
     }
     setSelectedCategory(category);
-  };
+  }, []);
 
-  const handleCountrySelect = (country: string) => {
+  const handleCountrySelect = useCallback((country: string) => {
     setSelectedCountry(country);
     setIsCountryModalVisible(false);
-  };
+  }, []);
 
-  const handleInstallProvider = async (provider: ProviderExtension) => {
-    if (!provider || !provider.value) {
-      Alert.alert('Error', 'Invalid provider data');
-      return;
-    }
+  const handleInstallProvider = useCallback(
+    async (provider: ProviderExtension) => {
+      if (!provider || !provider.value) return;
 
-    if (settingsStorage.isHapticFeedbackEnabled()) {
-      ReactNativeHapticFeedback.trigger('effectClick', {
-        enableVibrateFallback: true,
-        ignoreAndroidSystemSettings: false,
-      });
-    }
+      if (settingsStorage.isHapticFeedbackEnabled()) {
+        ReactNativeHapticFeedback.trigger('effectClick', {
+          enableVibrateFallback: true,
+          ignoreAndroidSystemSettings: false,
+        });
+      }
 
-    if (isMounted.current) {
-      setInstallingProvider(provider.value);
-    }
+      if (isMounted.current) setInstallingProvider(provider.value);
 
-    try {
-      await extensionManager.installProvider(provider);
-      if (isMounted.current) {
-        loadProviders();
-        Alert.alert(
-          'Success',
-          `${provider.display_name} has been installed successfully!`,
-        );
-        setInstalledProviders(extensionStorage.getInstalledProviders() || []);
-        if (
-          !activeExtensionProvider ||
-          activeExtensionProvider.value !== provider.value
-        ) {
-          setActiveExtensionProvider(provider);
+      try {
+        await extensionManager.installProvider(provider);
+        if (isMounted.current) {
+          loadProviders();
+          Alert.alert(
+            'Success',
+            `${provider.display_name} has been installed successfully!`,
+          );
+          setInstalledProviders(extensionStorage.getInstalledProviders() || []);
+          if (
+            !activeExtensionProvider ||
+            activeExtensionProvider.value !== provider.value
+          ) {
+            setActiveExtensionProvider(provider);
+          }
         }
+      } catch (error) {
+        if (isMounted.current)
+          Alert.alert('Error', 'Failed to install provider. Please try again.');
+      } finally {
+        if (isMounted.current) setInstallingProvider(null);
       }
-    } catch (error) {
-      console.error('Installation error:', error);
-      if (isMounted.current) {
-        Alert.alert('Error', 'Failed to install provider. Please try again.');
-      }
-    } finally {
-      if (isMounted.current) {
-        setInstallingProvider(null);
-      }
-    }
-  };
+    },
+    [
+      activeExtensionProvider,
+      loadProviders,
+      setActiveExtensionProvider,
+      setInstalledProviders,
+    ],
+  );
 
-  const handleUninstallProvider = (provider: ProviderExtension) => {
-    if (!provider || !provider.value) {
-      Alert.alert('Error', 'Invalid provider data');
-      return;
-    }
+  const handleUninstallProvider = useCallback(
+    (provider: ProviderExtension) => {
+      if (!provider || !provider.value) return;
 
-    Alert.alert(
-      'Uninstall Provider',
-      `Are you sure you want to uninstall ${
-        provider.display_name || 'this provider'
-      }?`,
-      [
-        {text: 'Cancel', style: 'cancel'},
-        {
-          text: 'Uninstall',
-          style: 'destructive',
-          onPress: () => {
-            extensionStorage.uninstallProvider(provider.value);
-            loadProviders();
-            setInstalledProviders(
-              extensionStorage.getInstalledProviders() || [],
-            );
-
-            if (activeExtensionProvider?.value === provider?.value) {
-              setActiveExtensionProvider(
-                extensionStorage.getInstalledProviders()[0] || {
-                  value: '',
-                  display_name: '',
-                  type: '',
-                  version: '',
-                },
+      Alert.alert(
+        'Uninstall Provider',
+        `Are you sure you want to uninstall ${provider.display_name || 'this provider'}?`,
+        [
+          {text: 'Cancel', style: 'cancel'},
+          {
+            text: 'Uninstall',
+            style: 'destructive',
+            onPress: () => {
+              extensionStorage.uninstallProvider(provider.value);
+              loadProviders();
+              setInstalledProviders(
+                extensionStorage.getInstalledProviders() || [],
               );
-            }
+
+              if (activeExtensionProvider?.value === provider?.value) {
+                setActiveExtensionProvider(
+                  extensionStorage.getInstalledProviders()[0] || {
+                    value: '',
+                    display_name: '',
+                    type: '',
+                    version: '',
+                  },
+                );
+              }
+            },
           },
-        },
-      ],
-    );
-  };
+        ],
+      );
+    },
+    [
+      activeExtensionProvider,
+      loadProviders,
+      setActiveExtensionProvider,
+      setInstalledProviders,
+    ],
+  );
 
-  const handleSetActiveProvider = (provider: ProviderExtension) => {
-    if (!provider || !provider.value) {
-      Alert.alert('Error', 'Invalid provider data');
-      return;
-    }
+  const handleSetActiveProvider = useCallback(
+    (provider: ProviderExtension) => {
+      if (!provider || !provider.value) return;
 
-    if (settingsStorage.isHapticFeedbackEnabled()) {
-      ReactNativeHapticFeedback.trigger('effectClick', {
-        enableVibrateFallback: true,
-        ignoreAndroidSystemSettings: false,
-      });
-    }
-    setActiveExtensionProvider(provider);
-  };
+      if (settingsStorage.isHapticFeedbackEnabled()) {
+        ReactNativeHapticFeedback.trigger('effectClick', {
+          enableVibrateFallback: true,
+          ignoreAndroidSystemSettings: false,
+        });
+      }
+      setActiveExtensionProvider(provider);
+    },
+    [setActiveExtensionProvider],
+  );
 
-  const handleRefresh = async () => {
-    if (isMounted.current) {
-      setRefreshing(true);
-    }
+  const handleRefresh = useCallback(async () => {
+    if (isMounted.current) setRefreshing(true);
     try {
       const providers = await extensionManager.fetchManifest(true);
       if (isMounted.current) {
@@ -314,7 +310,6 @@ const Extensions = ({navigation}: Props) => {
         await checkForUpdates();
       }
     } catch (error) {
-      console.error('Refresh error:', error);
       if (isMounted.current) {
         Alert.alert(
           'Error',
@@ -322,18 +317,14 @@ const Extensions = ({navigation}: Props) => {
         );
       }
     } finally {
-      if (isMounted.current) {
-        setRefreshing(false);
-      }
+      if (isMounted.current) setRefreshing(false);
     }
-  };
+  }, [checkForUpdates, loadProviders, setAvailableProviders]);
 
-  // --- BULK ACTION FUNCTIONS ---
-  const handleEnableAllProviders = async () => {
+  const handleEnableAllProviders = useCallback(async () => {
     if (settingsStorage.isHapticFeedbackEnabled()) {
       ReactNativeHapticFeedback.trigger('effectClick', {
         enableVibrateFallback: true,
-        ignoreAndroidSystemSettings: false,
       });
     }
 
@@ -358,9 +349,7 @@ const Extensions = ({navigation}: Props) => {
           text: 'Install All',
           style: 'default',
           onPress: async () => {
-            if (isMounted.current) {
-              setIsPerformingBulkAction(true);
-            }
+            if (isMounted.current) setIsPerformingBulkAction(true);
             try {
               await Promise.all(
                 availableToInstall.map(provider =>
@@ -376,29 +365,21 @@ const Extensions = ({navigation}: Props) => {
                 setActiveTab('installed');
               }
             } catch (error) {
-              console.error('Bulk installation error:', error);
-              if (isMounted.current) {
-                Alert.alert(
-                  'Error',
-                  'Failed to install all providers. Please try again.',
-                );
-              }
+              if (isMounted.current)
+                Alert.alert('Error', 'Failed to install all providers.');
             } finally {
-              if (isMounted.current) {
-                setIsPerformingBulkAction(false);
-              }
+              if (isMounted.current) setIsPerformingBulkAction(false);
             }
           },
         },
       ],
     );
-  };
+  }, [availableProviders, loadProviders]);
 
-  const handleDisableAllProviders = () => {
+  const handleDisableAllProviders = useCallback(() => {
     if (settingsStorage.isHapticFeedbackEnabled()) {
       ReactNativeHapticFeedback.trigger('effectClick', {
         enableVibrateFallback: true,
-        ignoreAndroidSystemSettings: false,
       });
     }
 
@@ -416,11 +397,10 @@ const Extensions = ({navigation}: Props) => {
           text: 'Uninstall All',
           style: 'destructive',
           onPress: () => {
-            const uninstallWithoutAlert = (provider: ProviderExtension) => {
-              if (!provider || !provider.value) return;
-              extensionStorage.uninstallProvider(provider.value);
-            };
-            installedProviders?.forEach(uninstallWithoutAlert);
+            installedProviders?.forEach(provider => {
+              if (provider && provider.value)
+                extensionStorage.uninstallProvider(provider.value);
+            });
             loadProviders();
             setActiveExtensionProvider(undefined);
             Alert.alert('Success', 'All providers have been uninstalled!');
@@ -428,234 +408,223 @@ const Extensions = ({navigation}: Props) => {
         },
       ],
     );
-  };
+  }, [installedProviders, loadProviders, setActiveExtensionProvider]);
 
-  // --- DYNAMIC DATA LOGIC ---
-
-  // 1. Get Unique Countries for the Dropdown (Dynamic)
   const uniqueCountries = useMemo(() => {
     const allProviders = [
       ...(installedProviders || []),
       ...(availableProviders || []),
     ] as ExtendedProvider[];
-
     const types = new Set<string>();
     allProviders.forEach(p => {
       if (p.type) types.add(p.type.toLowerCase());
     });
-
     const formattedTypes = Array.from(types).map(
       t => t.charAt(0).toUpperCase() + t.slice(1),
     );
-
     return ['All', ...formattedTypes.sort()];
   }, [installedProviders, availableProviders]);
 
-  // 2. Get Unique Categories for the Chips (Dynamic)
   const uniqueCategories = useMemo(() => {
     const allProviders = [
       ...(installedProviders || []),
       ...(availableProviders || []),
     ] as ExtendedProvider[];
-
     const categories = new Set<string>();
     allProviders.forEach(p => {
-      // Handle cases where category might be null or mixed case
       if (p.category) {
-        // Normalize: "Anime" and "anime" -> "Anime"
         const cat =
           p.category.charAt(0).toUpperCase() +
           p.category.slice(1).toLowerCase();
         categories.add(cat);
       }
     });
-
-    // Convert to array, sort, and prepend 'All'
     return ['All', ...Array.from(categories).sort()];
   }, [installedProviders, availableProviders]);
 
-  const getFilteredData = () => {
+  const currentData = useMemo(() => {
     const sourceData =
       activeTab === 'installed'
         ? installedProviders || []
         : availableProviders || [];
-
     return sourceData.filter((item: ExtendedProvider) => {
       if (!item || !item.value) return false;
-
-      // 1. Filter by Category
-      if (selectedCategory !== 'All') {
-        const itemCategory = item.category?.toLowerCase();
-        const targetCategory = selectedCategory.toLowerCase();
-        if (itemCategory !== targetCategory) {
-          return false;
-        }
-      }
-
-      // 2. Filter by Country (Type)
-      if (selectedCountry !== 'All') {
-        const itemType = item.type?.toLowerCase();
-        const targetType = selectedCountry.toLowerCase();
-        if (itemType !== targetType) {
-          return false;
-        }
-      }
-
-      // 3. Filter by Search
+      if (
+        selectedCategory !== 'All' &&
+        item.category?.toLowerCase() !== selectedCategory.toLowerCase()
+      )
+        return false;
+      if (
+        selectedCountry !== 'All' &&
+        item.type?.toLowerCase() !== selectedCountry.toLowerCase()
+      )
+        return false;
       if (searchQuery.trim().length > 0) {
         const searchLower = searchQuery.toLowerCase();
         const typeMatch = item.type?.toLowerCase().includes(searchLower);
         const nameMatch = item.display_name
           ?.toLowerCase()
           .includes(searchLower);
-
-        if (!typeMatch && !nameMatch) {
-          return false;
-        }
+        if (!typeMatch && !nameMatch) return false;
       }
-
       return true;
     });
-  };
+  }, [
+    activeTab,
+    installedProviders,
+    availableProviders,
+    selectedCategory,
+    selectedCountry,
+    searchQuery,
+  ]);
 
-  const currentData = getFilteredData();
+  const renderProviderCard = useCallback(
+    ({item}: {item: ExtendedProvider}) => {
+      if (!item || !item.value) return null;
+      const isActive = activeExtensionProvider?.value === item.value;
+      const isInstalled = extensionStorage.isProviderInstalled(item.value);
+      const isInstalling = installingProvider === item.value;
+      const isUpdating = updatingProvider === item.value;
+      const updateInfo = updateInfos.find(
+        info => info.provider.value === item.value,
+      );
+      const hasUpdate = updateInfo?.hasUpdate || false;
 
-  const renderProviderCard = ({item}: {item: ExtendedProvider}) => {
-    if (!item || !item.value) return null;
-    const isActive = activeExtensionProvider?.value === item.value;
-    const isInstalled = extensionStorage.isProviderInstalled(item.value);
-    const isInstalling = installingProvider === item.value;
-    const isUpdating = updatingProvider === item.value;
-    const updateInfo = updateInfos.find(
-      info => info.provider.value === item.value,
-    );
-    const hasUpdate = updateInfo?.hasUpdate || false;
-
-    return (
-      <View
-        className="bg-tertiary rounded-2xl p-5 py-3 mb-4 mx-4 shadow-lg border border-quaternary"
-        style={{elevation: 4}}>
-        <View className="flex-row items-center mb-4 gap-4 justify-between">
-          {/* Left: Icon */}
-          {item.icon ? (
-            <Image
-              source={{uri: item.icon}}
-              className="w-12 h-12 rounded-xl border-2 border-primary bg-quaternary"
-              style={{resizeMode: 'cover'}}
-            />
-          ) : (
-            <View className="px-3 py-2 bg-quaternary rounded-xl border border-gray-700">
-              <RenderProviderFlagIcon type={item.type} />
-            </View>
-          )}
-          {/* Middle: Info */}
-          <View className="flex-1 mx-3">
-            <View className="flex-row items-center flex-wrap">
-              <Text className="text-white text-lg font-bold tracking-wide">
-                {item.display_name || 'Unknown Provider'}
-              </Text>
-              {hasUpdate && updateInfo && (
-                <View
-                  style={{backgroundColor: primary}}
-                  className="px-2 py-0.5 rounded-full ml-1">
-                  <Text className="text-xs text-white font-semibold bg-gray-800">
-                    Update
-                  </Text>
-                </View>
-              )}
-            </View>
-            <View className="flex-row items-center flex-wrap gap-1 mt-1">
-              <Text className="text-gray-400 text-xs">
-                v{item.version || '?'} • {item.type?.toUpperCase() || 'GLOBAL'}
-              </Text>
-              {item.category && (
-                <View className="bg-gray-800 px-1.5 py-0.5 rounded ml-1">
-                  <Text className="text-gray-300 text-[10px] capitalize">
-                    {item.category}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-          {/* Right: Buttons */}
-          <View className="flex-row gap-3 items-center">
-            {activeTab === 'installed' ? (
-              <>
-                <TouchableOpacity
-                  onPress={() => handleSetActiveProvider(item)}
-                  className={`w-9 h-9 rounded-full items-center justify-center ${
-                    isActive ? 'bg-green-600' : 'bg-gray-700'
-                  }`}
-                  style={{opacity: isActive ? 1 : 0.9}}>
-                  <MaterialIcons
-                    name={isActive ? 'check-circle' : 'radio-button-unchecked'}
-                    size={20}
-                    color="white"
-                  />
-                </TouchableOpacity>
-                {hasUpdate && (
-                  <TouchableOpacity
-                    onPress={() => handleUpdateProvider(updateInfo!.provider)}
-                    disabled={isUpdating}
-                    className="w-9 h-9 rounded-full items-center justify-center"
-                    style={{
-                      backgroundColor: primary,
-                      opacity: isUpdating ? 0.7 : 1,
-                    }}>
-                    {isUpdating ? (
-                      <ActivityIndicator size="small" color="white" />
-                    ) : (
-                      <MaterialCommunityIcons
-                        name="update"
-                        size={20}
-                        color="white"
-                      />
-                    )}
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  onPress={() => handleUninstallProvider(item)}
-                  className="w-9 h-9 rounded-full items-center justify-center bg-red-600">
-                  <MaterialCommunityIcons
-                    name="delete"
-                    size={20}
-                    color="white"
-                  />
-                </TouchableOpacity>
-              </>
+      return (
+        <View
+          className="bg-[#1A1A1A] rounded-2xl p-5 py-3 mb-4 mx-4 shadow-lg border border-[#333333]"
+          style={{elevation: 4}}>
+          <View className="flex-row items-center mb-4 gap-4 justify-between">
+            {item.icon ? (
+              <Image
+                source={{uri: item.icon}}
+                className="w-12 h-12 rounded-xl border-2 border-primary bg-[#333333]"
+                style={{resizeMode: 'cover'}}
+              />
             ) : (
-              <TouchableOpacity
-                onPress={() => handleInstallProvider(item)}
-                disabled={isInstalled || isInstalling}
-                className={'w-9 h-9 rounded-full items-center justify-center'}
-                style={{
-                  opacity: isInstalling ? 0.7 : 1,
-                  backgroundColor: isInstalled ? 'gray' : primary,
-                }}>
-                {isInstalling ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <MaterialCommunityIcons
-                    name={isInstalled ? 'check' : 'download'}
-                    size={20}
-                    color="white"
-                  />
-                )}
-              </TouchableOpacity>
+              <View className="px-3 py-2 bg-[#333333] rounded-xl border border-gray-700">
+                <RenderProviderFlagIcon type={item.type} />
+              </View>
             )}
+            <View className="flex-1 mx-3">
+              <View className="flex-row items-center flex-wrap">
+                <Text className="text-white text-lg font-bold tracking-wide">
+                  {item.display_name || 'Unknown Provider'}
+                </Text>
+                {hasUpdate && updateInfo && (
+                  <View
+                    style={{backgroundColor: primary}}
+                    className="px-2 py-0.5 rounded-full ml-1">
+                    <Text className="text-xs text-white font-semibold">
+                      Update
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <View className="flex-row items-center flex-wrap gap-1 mt-1">
+                <Text className="text-gray-400 text-xs">
+                  v{item.version || '?'} •{' '}
+                  {item.type?.toUpperCase() || 'GLOBAL'}
+                </Text>
+                {item.category && (
+                  <View className="bg-gray-800 px-1.5 py-0.5 rounded ml-1">
+                    <Text className="text-gray-300 text-[10px] capitalize">
+                      {item.category}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+            <View className="flex-row gap-3 items-center">
+              {activeTab === 'installed' ? (
+                <>
+                  <TouchableOpacity
+                    onPress={() => handleSetActiveProvider(item)}
+                    className={`w-9 h-9 rounded-full items-center justify-center ${isActive ? 'bg-green-600' : 'bg-gray-700'}`}>
+                    <MaterialIcons
+                      name={
+                        isActive ? 'check-circle' : 'radio-button-unchecked'
+                      }
+                      size={20}
+                      color="white"
+                    />
+                  </TouchableOpacity>
+                  {hasUpdate && (
+                    <TouchableOpacity
+                      onPress={() => handleUpdateProvider(updateInfo!.provider)}
+                      disabled={isUpdating}
+                      className="w-9 h-9 rounded-full items-center justify-center"
+                      style={{
+                        backgroundColor: primary,
+                        opacity: isUpdating ? 0.7 : 1,
+                      }}>
+                      {isUpdating ? (
+                        <ActivityIndicator size="small" color="white" />
+                      ) : (
+                        <MaterialCommunityIcons
+                          name="update"
+                          size={20}
+                          color="white"
+                        />
+                      )}
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => handleUninstallProvider(item)}
+                    className="w-9 h-9 rounded-full items-center justify-center bg-red-600">
+                    <MaterialCommunityIcons
+                      name="delete"
+                      size={20}
+                      color="white"
+                    />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => handleInstallProvider(item)}
+                  disabled={isInstalled || isInstalling}
+                  className="w-9 h-9 rounded-full items-center justify-center"
+                  style={{
+                    opacity: isInstalling ? 0.7 : 1,
+                    backgroundColor: isInstalled ? 'gray' : primary,
+                  }}>
+                  {isInstalling ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <MaterialCommunityIcons
+                      name={isInstalled ? 'check' : 'download'}
+                      size={20}
+                      color="white"
+                    />
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         </View>
-      </View>
-    );
-  };
+      );
+    },
+    [
+      activeExtensionProvider,
+      installingProvider,
+      updatingProvider,
+      updateInfos,
+      activeTab,
+      primary,
+      handleSetActiveProvider,
+      handleUpdateProvider,
+      handleUninstallProvider,
+      handleInstallProvider,
+    ],
+  );
 
   return (
     <View className="flex-1 bg-black pt-10 pb-16">
       <StatusBar backgroundColor="black" barStyle="light-content" />
-      {/* Header */}
       <View className="flex-row items-center justify-between p-4 border-b border-gray-800">
         <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
-          <AntDesign name="arrowleft" size={24} color="white" />
+          {/* FIXED: Replaced invalid AntDesign 'arrowleft' with Ionicons 'arrow-back' */}
+          <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text className="text-white text-xl font-semibold">Providers</Text>
         <View className="flex-row items-center space-x-2">
@@ -686,7 +655,8 @@ const Extensions = ({navigation}: Props) => {
           <TouchableOpacity
             onPress={() => navigation.navigate('AddExtension' as any)}
             className="ml-1 mr-2">
-            <AntDesign name="pluscircleo" size={22} color={primary} />
+            {/* FIXED: Replaced invalid AntDesign 'pluscircleo' with Feather 'plus-circle' */}
+            <Feather name="plus-circle" size={22} color={primary} />
           </TouchableOpacity>
           <TouchableOpacity onPress={handleRefresh}>
             <Feather name="refresh-cw" size={24} color={primary} />
@@ -694,8 +664,7 @@ const Extensions = ({navigation}: Props) => {
         </View>
       </View>
 
-      {/* Tabs */}
-      <View className="flex-row bg-quaternary mx-4 mt-4 rounded-xl">
+      <View className="flex-row bg-[#1A1A1A] mx-4 mt-4 rounded-xl border border-[#333333]">
         <TouchableOpacity
           onPress={() => handleTabChange('installed')}
           className="flex-1 py-3 rounded-xl"
@@ -704,13 +673,10 @@ const Extensions = ({navigation}: Props) => {
               activeTab === 'installed' ? primary : 'transparent',
           }}>
           <Text
-            className={`text-center font-medium ${
-              activeTab === 'installed' ? 'text-white' : 'text-gray-400'
-            }`}>
+            className={`text-center font-medium ${activeTab === 'installed' ? 'text-white' : 'text-gray-400'}`}>
             Installed ({(installedProviders || []).length})
           </Text>
         </TouchableOpacity>
-
         <TouchableOpacity
           onPress={() => handleTabChange('available')}
           className="flex-1 py-3 rounded-xl"
@@ -719,17 +685,13 @@ const Extensions = ({navigation}: Props) => {
               activeTab === 'available' ? primary : 'transparent',
           }}>
           <Text
-            className={`text-center font-medium ${
-              activeTab === 'available' ? 'text-white' : 'text-gray-400'
-            }`}>
+            className={`text-center font-medium ${activeTab === 'available' ? 'text-white' : 'text-gray-400'}`}>
             Available ({(availableProviders || []).length})
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* --- FILTERS SECTION --- */}
       <View className="mt-4 mx-4">
-        {/* Search Bar */}
         <View className="flex-row items-center bg-gray-900 rounded-xl px-3 py-2 border border-gray-800 mb-3">
           <Ionicons name="search" size={20} color="gray" />
           <TextInput
@@ -746,9 +708,7 @@ const Extensions = ({navigation}: Props) => {
           )}
         </View>
 
-        {/* Category Chips & Country Select */}
         <View className="flex-row items-center gap-2">
-          {/* Dynamic Categories ScrollView */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -758,31 +718,18 @@ const Extensions = ({navigation}: Props) => {
               <TouchableOpacity
                 key={cat}
                 onPress={() => handleCategorySelect(cat)}
-                className={`px-4 py-1.5 rounded-full border ${
-                  selectedCategory === cat
-                    ? 'bg-primary border-primary'
-                    : 'bg-gray-900 border-gray-700'
-                }`}>
+                className={`px-4 py-1.5 rounded-full border ${selectedCategory === cat ? 'bg-primary border-primary' : 'bg-gray-900 border-gray-700'}`}>
                 <Text
-                  className={`${
-                    selectedCategory === cat
-                      ? 'text-white font-semibold'
-                      : 'text-gray-400'
-                  }`}>
+                  className={`${selectedCategory === cat ? 'text-white font-semibold' : 'text-gray-400'}`}>
                   {cat}
                 </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
 
-          {/* Country Selector Button (Triggers Bottom Sheet) */}
           <TouchableOpacity
             onPress={() => setIsCountryModalVisible(true)}
-            className={`px-3 py-1.5 rounded-full border flex-row items-center gap-1 ${
-              selectedCountry !== 'All'
-                ? 'bg-gray-800 border-primary'
-                : 'bg-gray-900 border-gray-700'
-            }`}>
+            className={`px-3 py-1.5 rounded-full border flex-row items-center gap-1 ${selectedCountry !== 'All' ? 'bg-gray-800 border-primary' : 'bg-gray-900 border-gray-700'}`}>
             <Text
               className={
                 selectedCountry !== 'All' ? 'text-white' : 'text-gray-400'
@@ -798,10 +745,13 @@ const Extensions = ({navigation}: Props) => {
         </View>
       </View>
 
-      {/* Provider list */}
       <FlatList
         data={currentData}
-        keyExtractor={(item, index) => item?.value || `provider-${index}`}
+        keyExtractor={useCallback(
+          (item: ExtendedProvider, index: number) =>
+            item?.value || `provider-${index}`,
+          [],
+        )}
         renderItem={renderProviderCard}
         className="flex-1 mt-4"
         refreshControl={
@@ -830,7 +780,6 @@ const Extensions = ({navigation}: Props) => {
         }
       />
 
-      {/* --- Country Selection Bottom Sheet Modal --- */}
       <Modal
         visible={isCountryModalVisible}
         transparent={true}
@@ -842,12 +791,9 @@ const Extensions = ({navigation}: Props) => {
           className="flex-1 bg-black/60 justify-end">
           <TouchableWithoutFeedback>
             <View className="bg-gray-900 w-full rounded-t-3xl border-t border-gray-700 max-h-[70%]">
-              {/* Drag Handle */}
               <View className="w-full items-center pt-3 pb-2">
                 <View className="w-12 h-1.5 bg-gray-600 rounded-full" />
               </View>
-
-              {/* Header */}
               <View className="px-5 pb-3 border-b border-gray-800 flex-row justify-between items-center">
                 <Text className="text-white font-bold text-xl">
                   Select Country
@@ -858,27 +804,17 @@ const Extensions = ({navigation}: Props) => {
                   <Ionicons name="close" size={20} color="gray" />
                 </TouchableOpacity>
               </View>
-
-              {/* List */}
               <ScrollView
                 contentContainerStyle={{padding: 16, paddingBottom: 40}}>
                 {uniqueCountries.map(country => (
                   <TouchableOpacity
                     key={country}
                     onPress={() => handleCountrySelect(country)}
-                    className={`p-4 rounded-xl mb-2 flex-row justify-between items-center border ${
-                      selectedCountry === country
-                        ? 'bg-primary/20 border-primary'
-                        : 'bg-gray-800/50 border-gray-800'
-                    }`}>
+                    className={`p-4 rounded-xl mb-2 flex-row justify-between items-center border ${selectedCountry === country ? 'bg-primary/20 border-primary' : 'bg-gray-800/50 border-gray-800'}`}>
                     <View className="flex-row items-center gap-3">
                       <RenderProviderFlagIcon type={country} />
                       <Text
-                        className={`${
-                          selectedCountry === country
-                            ? 'text-primary font-bold text-lg'
-                            : 'text-gray-300 text-lg'
-                        }`}>
+                        className={`${selectedCountry === country ? 'text-primary font-bold text-lg' : 'text-gray-300 text-lg'}`}>
                         {country}
                       </Text>
                     </View>

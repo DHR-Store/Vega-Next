@@ -5,30 +5,16 @@ apply plugin: "com.google.gms.google-services"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
-/**
- * This is the configuration block to customize your React Native Android app.
- * By default you don't need to apply any configuration, just uncomment the lines you need.
- */
 react {
     entryFile = file(["node", "-e", "require('expo/scripts/resolveAppEntry')", projectRoot, "android", "absolute"].execute(null, rootDir).text.trim())
     reactNativeDir = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
     hermesCommand = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsolutePath() + "/sdks/hermesc/%OS-BIN%/hermesc"
     codegenDir = new File(["node", "--print", "require.resolve('@react-native/codegen/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
-
-    // Use Expo CLI to bundle the app, this ensures the Metro config
-    // works correctly with Expo projects.
-    cliFile = new File(["node", "--print", "require.resolve('@expo/cli', { paths: [require.resolve('expo/package.json')] })"].execute(null, rootDir).text.trim())
-    bundleCommand = "export:embed"
-
-    autolinkLibrariesWithApp()
-    //
-    // Added by install-expo-modules
-    entryFile = file(["node", "-e", "require('expo/scripts/resolveAppEntry')", rootDir.getAbsoluteFile().getParentFile().getAbsolutePath(), "android", "absolute"].execute(null, rootDir).text.trim())
     cliFile = new File(["node", "--print", "require.resolve('@expo/cli')"].execute(null, rootDir).text.trim())
     bundleCommand = "export:embed"
+    autolinkLibrariesWithApp()
 }
 
-def enableProguardInReleaseBuilds = (findProperty('android.enableProguardInReleaseBuilds') ?: false).toBoolean()
 def jscFlavor = 'org.webkit:android-jsc:+'
 
 android {
@@ -37,14 +23,18 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace 'com.vega.next'
+
     defaultConfig {
         applicationId 'com.vega.next'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 151
-        versionName "3.5.2"
+        versionCode 153
+        versionName "3.5.4"   // <-- change this to "5.3" if you want "release5.3"
 
-        // OneSignal placeholders
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+        }
+
         manifestPlaceholders = [
             onesignal_app_id               : "fc34c762-8fbb-45c8-aeb6-b04afbe7c930",
             onesignal_google_project_number: "REMOTE"
@@ -67,14 +57,12 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        // ADDED: Release signing configuration
         release {
-            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
-                storeFile file(MYAPP_UPLOAD_STORE_FILE)
-                storePassword MYAPP_UPLOAD_STORE_PASSWORD
-                keyAlias MYAPP_UPLOAD_KEY_ALIAS
-                keyPassword MYAPP_UPLOAD_KEY_PASSWORD
-            }
+            // These are read from ~/.gradle/gradle.properties (never commit to git)
+            storeFile file(MYAPP_UPLOAD_STORE_FILE)
+            storePassword MYAPP_UPLOAD_STORE_PASSWORD
+            keyAlias MYAPP_UPLOAD_KEY_ALIAS
+            keyPassword MYAPP_UPLOAD_KEY_PASSWORD
         }
     }
 
@@ -82,13 +70,47 @@ android {
         debug {
             signingConfig signingConfigs.debug
         }
+
         release {
-            // FIXED: Changed from signingConfigs.debug to signingConfigs.release
-            signingConfig signingConfigs.release 
-            shrinkResources (findProperty('android.enableShrinkResourcesInReleaseBuilds')?.toBoolean() ?: false)
-            minifyEnabled enableProguardInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
-            crunchPngs (findProperty('android.enablePngCrunchInReleaseBuilds')?.toBoolean() ?: true)
+            // ✅ CRITICAL: must be signed with your OWN keystore (not debug)
+            signingConfig signingConfigs.release
+
+            // ✅ Enable R8 full-mode shrinking — reduces Play Protect suspicion
+            minifyEnabled true
+
+            // ✅ Shrink unused resources — smaller APK, less scan surface
+            shrinkResources true
+
+            // ✅ Use R8 (default in modern AGP) — stronger than ProGuard
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+
+            // ✅ Crush PNGs to reduce size
+            crunchPngs true
+
+            // ✅ Remove debug symbols from native libs in release
+            debuggable false
+
+            // ✅ Jni debug info stripped
+            jniDebuggable false
+
+            // ✅ Render script — keep optimised
+            renderscriptDebuggable false
+            renderscriptOptimLevel 3
+
+            // ✅ Pseudo-locales bloat removed
+            pseudoLocalesEnabled false
+        }
+    }
+
+    // ========== CUSTOM APK OUTPUT FILENAME ==========
+    applicationVariants.all { variant ->
+        variant.outputs.each { output ->
+            if (variant.buildType.name == "release") {
+                // Get the ABI filter (e.g., "armeabi-v7a") or "universal" for the fat APK
+                def abi = output.getFilter(com.android.build.OutputFile.ABI) ?: "universal"
+                // Set the filename: Vega-Next-<abi>-release<versionName>.apk
+                output.outputFileName = "Vega-Next-${abi}-release${variant.versionName}.apk"
+            }
         }
     }
 
@@ -96,10 +118,33 @@ android {
         jniLibs {
             useLegacyPackaging (findProperty('expo.useLegacyPackaging')?.toBoolean() ?: false)
         }
+        // ✅ Strip duplicate native libs that can cause bloat / scan flags
+        pickFirst '**/libc++_shared.so'
+        pickFirst '**/libfbjni.so'
+    }
+
+    // ✅ Remove unused language resources (keeps only English by default)
+    // Add more locales your app actually supports
+    bundle {
+        language {
+            enableSplit = true
+        }
+        density {
+            enableSplit = true
+        }
+        abi {
+            enableSplit = true
+        }
     }
 
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+    }
+
+    // ✅ Compile with Java 17 for modern toolchain
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 }
 
@@ -123,7 +168,6 @@ dependencies {
     if (isGifEnabled) {
         implementation("com.facebook.fresco:animated-gif:${reactAndroidLibs.versions.fresco.get()}")
     }
-
     if (isWebpEnabled) {
         implementation("com.facebook.fresco:webpsupport:${reactAndroidLibs.versions.fresco.get()}")
         if (isWebpAnimatedEnabled) {
@@ -137,7 +181,6 @@ dependencies {
         implementation jscFlavor
     }
 
-    // Firebase & OneSignal
     implementation platform('com.google.firebase:firebase-bom:32.7.0')
     implementation 'com.google.firebase:firebase-analytics'
     implementation 'com.google.firebase:firebase-messaging'

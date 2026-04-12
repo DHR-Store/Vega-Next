@@ -1,4 +1,9 @@
-import {mainStorage} from './StorageService';
+// FIX: Import the StorageService class directly instead of the partitioned mainStorage
+import {StorageService} from './StorageService';
+
+// Create a GLOBAL storage instance that is tied to the device, NOT the user.
+// This prevents extension data from vanishing when a user logs in or out.
+const globalExtensionStorage = new StorageService('extensions-global-storage');
 
 /**
  * Provider extension metadata
@@ -40,6 +45,7 @@ export enum ExtensionKeys {
   PROVIDER_MODULES = 'providerModules',
   MANIFEST_CACHE = 'manifestCache',
   LAST_MANIFEST_FETCH = 'lastManifestFetch',
+  SELECTED_PROVIDER = 'selectedProvider', // <-- NEW: Key to store the chosen provider
 }
 
 /**
@@ -51,7 +57,7 @@ export class ExtensionStorage {
    */
   getInstalledProviders(): ProviderExtension[] {
     return (
-      mainStorage.getArray<ProviderExtension>(
+      globalExtensionStorage.getArray<ProviderExtension>(
         ExtensionKeys.INSTALLED_PROVIDERS,
       ) || []
     );
@@ -61,7 +67,7 @@ export class ExtensionStorage {
    * Set installed providers
    */
   setInstalledProviders(providers: ProviderExtension[]): void {
-    mainStorage.setArray(ExtensionKeys.INSTALLED_PROVIDERS, providers);
+    globalExtensionStorage.setArray(ExtensionKeys.INSTALLED_PROVIDERS, providers);
   }
 
   /**
@@ -69,7 +75,7 @@ export class ExtensionStorage {
    */
   getAvailableProviders(): ProviderExtension[] {
     return (
-      mainStorage.getArray<ProviderExtension>(
+      globalExtensionStorage.getArray<ProviderExtension>(
         ExtensionKeys.AVAILABLE_PROVIDERS,
       ) || []
     );
@@ -79,7 +85,7 @@ export class ExtensionStorage {
    * Set available providers
    */
   setAvailableProviders(providers: ProviderExtension[]): void {
-    mainStorage.setArray(ExtensionKeys.AVAILABLE_PROVIDERS, providers);
+    globalExtensionStorage.setArray(ExtensionKeys.AVAILABLE_PROVIDERS, providers);
   }
 
   /**
@@ -115,6 +121,11 @@ export class ExtensionStorage {
 
     // Also remove cached modules
     this.removeProviderModules(providerValue);
+
+    // If the uninstalled provider was the selected one, clear the selection
+    if (this.getSelectedProvider() === providerValue) {
+      globalExtensionStorage.delete(ExtensionKeys.SELECTED_PROVIDER);
+    }
   }
 
   /**
@@ -130,7 +141,7 @@ export class ExtensionStorage {
    */
   getProviderModules(providerValue: string): ProviderModule | undefined {
     const allModules =
-      mainStorage.getArray<ProviderModule>(ExtensionKeys.PROVIDER_MODULES) ||
+      globalExtensionStorage.getArray<ProviderModule>(ExtensionKeys.PROVIDER_MODULES) ||
       [];
     return allModules.find(m => m.value === providerValue);
   }
@@ -140,7 +151,7 @@ export class ExtensionStorage {
    */
   cacheProviderModules(modules: ProviderModule): void {
     const allModules =
-      mainStorage.getArray<ProviderModule>(ExtensionKeys.PROVIDER_MODULES) ||
+      globalExtensionStorage.getArray<ProviderModule>(ExtensionKeys.PROVIDER_MODULES) ||
       [];
 
     const existingIndex = allModules.findIndex(m => m.value === modules.value);
@@ -151,7 +162,7 @@ export class ExtensionStorage {
       allModules.push(modules);
     }
 
-    mainStorage.setArray(ExtensionKeys.PROVIDER_MODULES, allModules);
+    globalExtensionStorage.setArray(ExtensionKeys.PROVIDER_MODULES, allModules);
   }
 
   /**
@@ -159,11 +170,11 @@ export class ExtensionStorage {
    */
   removeProviderModules(providerValue: string): void {
     const allModules =
-      mainStorage.getArray<ProviderModule>(ExtensionKeys.PROVIDER_MODULES) ||
+      globalExtensionStorage.getArray<ProviderModule>(ExtensionKeys.PROVIDER_MODULES) ||
       [];
 
     const filtered = allModules.filter(m => m.value !== providerValue);
-    mainStorage.setArray(ExtensionKeys.PROVIDER_MODULES, filtered);
+    globalExtensionStorage.setArray(ExtensionKeys.PROVIDER_MODULES, filtered);
   }
 
   /**
@@ -171,7 +182,7 @@ export class ExtensionStorage {
    */
   getManifestCache(): ProviderExtension[] {
     return (
-      mainStorage.getArray<ProviderExtension>(ExtensionKeys.MANIFEST_CACHE) ||
+      globalExtensionStorage.getArray<ProviderExtension>(ExtensionKeys.MANIFEST_CACHE) ||
       []
     );
   }
@@ -180,15 +191,15 @@ export class ExtensionStorage {
    * Set manifest cache
    */
   setManifestCache(manifest: ProviderExtension[]): void {
-    mainStorage.setArray(ExtensionKeys.MANIFEST_CACHE, manifest);
-    mainStorage.setNumber(ExtensionKeys.LAST_MANIFEST_FETCH, Date.now());
+    globalExtensionStorage.setArray(ExtensionKeys.MANIFEST_CACHE, manifest);
+    globalExtensionStorage.setNumber(ExtensionKeys.LAST_MANIFEST_FETCH, Date.now());
   }
 
   /**
    * Get last manifest fetch time
    */
   getLastManifestFetch(): number {
-    return mainStorage.getNumber(ExtensionKeys.LAST_MANIFEST_FETCH) || 0;
+    return globalExtensionStorage.getNumber(ExtensionKeys.LAST_MANIFEST_FETCH) || 0;
   }
 
   /**
@@ -219,15 +230,34 @@ export class ExtensionStorage {
     });
   }
 
+  // =========================================================================
+  // NEW METHODS: Store & Retrieve the Currently Selected Provider
+  // =========================================================================
+
+  /**
+   * Get the currently selected provider (survives app restart & user login)
+   */
+  getSelectedProvider(): string | undefined {
+    return globalExtensionStorage.getString(ExtensionKeys.SELECTED_PROVIDER);
+  }
+
+  /**
+   * Set the currently selected provider
+   */
+  setSelectedProvider(providerValue: string): void {
+    globalExtensionStorage.setString(ExtensionKeys.SELECTED_PROVIDER, providerValue);
+  }
+
   /**
    * Clear all extension data
    */
   clearAll(): void {
-    mainStorage.delete(ExtensionKeys.INSTALLED_PROVIDERS);
-    mainStorage.delete(ExtensionKeys.AVAILABLE_PROVIDERS);
-    mainStorage.delete(ExtensionKeys.PROVIDER_MODULES);
-    mainStorage.delete(ExtensionKeys.MANIFEST_CACHE);
-    mainStorage.delete(ExtensionKeys.LAST_MANIFEST_FETCH);
+    globalExtensionStorage.delete(ExtensionKeys.INSTALLED_PROVIDERS);
+    globalExtensionStorage.delete(ExtensionKeys.AVAILABLE_PROVIDERS);
+    globalExtensionStorage.delete(ExtensionKeys.PROVIDER_MODULES);
+    globalExtensionStorage.delete(ExtensionKeys.MANIFEST_CACHE);
+    globalExtensionStorage.delete(ExtensionKeys.LAST_MANIFEST_FETCH);
+    globalExtensionStorage.delete(ExtensionKeys.SELECTED_PROVIDER);
   }
 }
 

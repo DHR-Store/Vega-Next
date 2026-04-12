@@ -1,4 +1,4 @@
-import React, {useState, useMemo, useCallback, useEffect} from 'react';
+import React, {useState, useMemo, useCallback, useEffect, useRef} from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   Pressable,
   ScrollView,
   TextInput,
+  Animated,
+  Easing,
 } from 'react-native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useNavigation} from '@react-navigation/native';
@@ -21,6 +23,7 @@ import {MotiView} from 'moti';
 import {Skeleton} from 'moti/skeleton';
 import * as IntentLauncher from 'expo-intent-launcher';
 import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
+import * as RNFS from '@dr.pogodin/react-native-fs';
 
 // --- NEW IMPORTS ---
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -80,7 +83,7 @@ const EpisodeRow = React.memo(
     type,
     providerValue,
     playHandler,
-    isCompleted,
+    getWatchProgressData,
     stickyMenu,
     titleAlignment,
     onLongPressHandler,
@@ -95,6 +98,9 @@ const EpisodeRow = React.memo(
       item.title
     ).replaceAll(/[^a-zA-Z0-9]/g, '_');
 
+    // Fetch dynamic real-time progress for this specific episode
+    const watchData = getWatchProgressData(item.link);
+
     useEffect(() => {
       let interval: NodeJS.Timeout;
       const checkStatus = async () => {
@@ -103,9 +109,26 @@ const EpisodeRow = React.memo(
           if (taskData) {
             const task = JSON.parse(taskData);
             if (task.totalBytes > 0) {
-              const pct = (task.downloadedBytes / task.totalBytes) * 100;
-              setProgress(pct);
-              setIsDownloading(pct < 100); // Stop animating once it hits 100%
+              let currentBytes = task.downloadedBytes || 0;
+              try {
+                if (task.path) {
+                  const stat = await RNFS.stat(task.path);
+                  if (stat && stat.size > currentBytes) {
+                    currentBytes = stat.size;
+                  }
+                }
+              } catch (e) {}
+
+              const pct = (currentBytes / task.totalBytes) * 100;
+
+              if (pct >= 100) {
+                setIsDownloading(false);
+                setProgress(100);
+                AsyncStorage.removeItem(`download_${fileName}`);
+              } else {
+                setProgress(pct);
+                setIsDownloading(true);
+              }
             } else {
               setIsDownloading(true);
               setProgress(0);
@@ -114,27 +137,30 @@ const EpisodeRow = React.memo(
             setIsDownloading(false);
             setProgress(0);
           }
-        } catch (error) {
-          // Safe to ignore polling errors
-        }
+        } catch (error) {}
       };
 
       interval = setInterval(checkStatus, 1000);
-      checkStatus(); // Initial Check
+      checkStatus();
       return () => clearInterval(interval);
     }, [fileName]);
 
     return (
       <View
         className={`w-full justify-center items-center gap-2 flex-row my-1 ${
-          isCompleted(item.link) || stickyMenu.link === item.link
+          watchData.isCompleted || stickyMenu.link === item.link
             ? 'opacity-60'
-            : ''
+            : watchData.inProgress
+              ? 'opacity-80' // Darkens row slightly if currently watching
+              : ''
         }`}>
         <View className="flex-row w-full justify-between gap-2 items-center">
-          {/* Main Episode Button with Background Gradient Progress */}
           <TouchableOpacity
-            className={`rounded-md bg-white/30 w-[80%] h-12 items-center p-1 flex-row gap-x-2 relative overflow-hidden ${titleAlignment}`}
+            className={`rounded-md ${
+              watchData.isCompleted || watchData.inProgress
+                ? 'bg-white/15' // Subtle dim white for watched/in-progress instead of black
+                : 'bg-white/30' // Normal state
+            } w-[80%] min-h-[48px] items-center p-2 flex-row gap-x-2 relative overflow-hidden ${titleAlignment}`}
             onPress={() =>
               playHandler({
                 linkIndex: index,
@@ -146,7 +172,24 @@ const EpisodeRow = React.memo(
               })
             }
             onLongPress={() => onLongPressHandler(true, item.link, 'series')}>
-            {/* Animated Background Filling Up */}
+            {/* WATCH PROGRESS GRADIENT (Primary to Green) */}
+            {watchData.percentage > 0 && (
+              <LinearGradient
+                colors={[primary, '#00C853']} // Theme Primary Color to Green
+                start={{x: 0, y: 0}}
+                end={{x: 1, y: 0}}
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: `${watchData.percentage}%`,
+                  opacity: 0.4, // Keep it dim so text stays readable
+                }}
+              />
+            )}
+
+            {/* DOWNLOAD PROGRESS GRADIENT */}
             {isDownloading && (
               <LinearGradient
                 colors={['#FF416C', '#FF4B2B']}
@@ -163,24 +206,44 @@ const EpisodeRow = React.memo(
               />
             )}
 
-            <Ionicons name="play-circle" size={28} color={primary} />
-            <Text className="text-white bg-transparent">
-              {item.title.length > 30
-                ? item.title.slice(0, 30) + '...'
-                : item.title}
-            </Text>
+            {/* Added zIndex: 1 to ensure UI elements stay clearly above gradients */}
+            <Ionicons
+              name="play-circle"
+              size={28}
+              color={primary}
+              style={{zIndex: 1}}
+            />
 
-            {/* Download Percentage Text displayed on the Button */}
+            <View
+              className="flex-1 flex-col justify-center"
+              style={{zIndex: 1}}>
+              <Text
+                className="text-white bg-transparent font-medium"
+                numberOfLines={1}>
+                {item.title}
+              </Text>
+              {watchData.text ? (
+                <Text
+                  style={{
+                    color: primary,
+                    fontSize: 11,
+                    fontWeight: 'bold',
+                    marginTop: 2,
+                  }}>
+                  {watchData.text}
+                </Text>
+              ) : null}
+            </View>
+
             {isDownloading && (
               <Text
-                className="text-white font-bold ml-auto pr-2 bg-transparent"
-                style={{fontSize: 12}}>
+                className="text-white font-bold pr-2 bg-transparent"
+                style={{fontSize: 12, zIndex: 1}}>
                 {Math.floor(progress)}%
               </Text>
             )}
           </TouchableOpacity>
 
-          {/* Existing Downloader untouched */}
           <Downloader
             providerValue={providerValue}
             link={item.link}
@@ -210,7 +273,7 @@ const DirectLinkRow = React.memo(
     type,
     providerValue,
     playHandler,
-    isCompleted,
+    getWatchProgressData,
     stickyMenu,
     titleAlignment,
     onLongPressHandler,
@@ -225,6 +288,9 @@ const DirectLinkRow = React.memo(
       item.title
     ).replaceAll(/[^a-zA-Z0-9]/g, '_');
 
+    // Fetch dynamic real-time progress for this specific episode
+    const watchData = getWatchProgressData(item.link);
+
     useEffect(() => {
       let interval: NodeJS.Timeout;
       const checkStatus = async () => {
@@ -233,9 +299,26 @@ const DirectLinkRow = React.memo(
           if (taskData) {
             const task = JSON.parse(taskData);
             if (task.totalBytes > 0) {
-              const pct = (task.downloadedBytes / task.totalBytes) * 100;
-              setProgress(pct);
-              setIsDownloading(pct < 100);
+              let currentBytes = task.downloadedBytes || 0;
+              try {
+                if (task.path) {
+                  const stat = await RNFS.stat(task.path);
+                  if (stat && stat.size > currentBytes) {
+                    currentBytes = stat.size;
+                  }
+                }
+              } catch (e) {}
+
+              const pct = (currentBytes / task.totalBytes) * 100;
+
+              if (pct >= 100) {
+                setIsDownloading(false);
+                setProgress(100);
+                AsyncStorage.removeItem(`download_${fileName}`);
+              } else {
+                setProgress(pct);
+                setIsDownloading(true);
+              }
             } else {
               setIsDownloading(true);
               setProgress(0);
@@ -244,9 +327,7 @@ const DirectLinkRow = React.memo(
             setIsDownloading(false);
             setProgress(0);
           }
-        } catch (error) {
-          // Safe to ignore
-        }
+        } catch (error) {}
       };
 
       interval = setInterval(checkStatus, 1000);
@@ -257,14 +338,19 @@ const DirectLinkRow = React.memo(
     return (
       <View
         className={`w-full justify-center items-center my-2 gap-2 flex-row ${
-          isCompleted(item.link) || stickyMenu.link === item.link
+          watchData.isCompleted || stickyMenu.link === item.link
             ? 'opacity-60'
-            : ''
+            : watchData.inProgress
+              ? 'opacity-80'
+              : ''
         }`}>
         <View className="flex-row w-full justify-between gap-2 items-center">
-          {/* Main DirectLink Button with Background Gradient Progress */}
           <TouchableOpacity
-            className={`rounded-md bg-white/30 w-[80%] h-12 items-center p-2 flex-row gap-x-2 relative overflow-hidden ${titleAlignment}`}
+            className={`rounded-md ${
+              watchData.isCompleted || watchData.inProgress
+                ? 'bg-white/15' // Subtle dim white for watched/in-progress instead of black
+                : 'bg-white/30' // Normal state
+            } w-[80%] min-h-[48px] items-center p-2 flex-row gap-x-2 relative overflow-hidden ${titleAlignment}`}
             onPress={() =>
               playHandler({
                 linkIndex: index,
@@ -278,6 +364,24 @@ const DirectLinkRow = React.memo(
             onLongPress={() =>
               onLongPressHandler(true, item.link, item?.type || 'series')
             }>
+            {/* WATCH PROGRESS GRADIENT (Primary to Green) */}
+            {watchData.percentage > 0 && (
+              <LinearGradient
+                colors={[primary, '#00C853']} // Theme Primary Color to Green
+                start={{x: 0, y: 0}}
+                end={{x: 1, y: 0}}
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: `${watchData.percentage}%`,
+                  opacity: 0.4, // Keep it dim so text stays readable
+                }}
+              />
+            )}
+
+            {/* DOWNLOAD PROGRESS GRADIENT */}
             {isDownloading && (
               <LinearGradient
                 colors={['#FF416C', '#FF4B2B']}
@@ -294,20 +398,42 @@ const DirectLinkRow = React.memo(
               />
             )}
 
-            <Ionicons name="play-circle" size={28} color={primary} />
-            <Text className="text-white bg-transparent">
-              {activeSeason?.directLinks?.length &&
-              activeSeason?.directLinks?.length > 1
-                ? item.title?.length > 27
-                  ? item.title.slice(0, 27) + '...'
-                  : item.title
-                : 'Play'}
-            </Text>
+            {/* Added zIndex: 1 to ensure UI elements stay clearly above gradients */}
+            <Ionicons
+              name="play-circle"
+              size={28}
+              color={primary}
+              style={{zIndex: 1}}
+            />
+
+            <View
+              className="flex-1 flex-col justify-center"
+              style={{zIndex: 1}}>
+              <Text
+                className="text-white bg-transparent font-medium"
+                numberOfLines={1}>
+                {activeSeason?.directLinks?.length &&
+                activeSeason?.directLinks?.length > 1
+                  ? item.title
+                  : 'Play'}
+              </Text>
+              {watchData.text ? (
+                <Text
+                  style={{
+                    color: primary,
+                    fontSize: 11,
+                    fontWeight: 'bold',
+                    marginTop: 2,
+                  }}>
+                  {watchData.text}
+                </Text>
+              ) : null}
+            </View>
 
             {isDownloading && (
               <Text
-                className="text-white font-bold ml-auto pr-2 bg-transparent"
-                style={{fontSize: 12}}>
+                className="text-white font-bold pr-2 bg-transparent"
+                style={{fontSize: 12, zIndex: 1}}>
                 {Math.floor(progress)}%
               </Text>
             )}
@@ -329,7 +455,6 @@ const DirectLinkRow = React.memo(
     );
   },
 );
-
 // ============================================================================
 // --- MAIN SEASON LIST COMPONENT ---
 // ============================================================================
@@ -369,9 +494,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
           link => link.title === parsedSeason.title,
         );
         if (seasonExists) return parsedSeason;
-      } catch (error) {
-        console.warn('Failed to parse cached season:', error);
-      }
+      } catch (error) {}
     }
     return LinkList[0];
   });
@@ -400,15 +523,37 @@ const SeasonList: React.FC<SeasonListProps> = ({
   const [externalPlayerStreams, setExternalPlayerStreams] = useState<any[]>([]);
   const [isLoadingStreams, setIsLoadingStreams] = useState<boolean>(false);
 
+  const vlcSpinValue = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (vlcLoading) {
+      vlcSpinValue.setValue(0);
+      Animated.loop(
+        Animated.timing(vlcSpinValue, {
+          toValue: 1,
+          duration: 1000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+      ).start();
+    } else {
+      vlcSpinValue.stopAnimation();
+    }
+  }, [vlcLoading, vlcSpinValue]);
+
+  const vlcSpin = vlcSpinValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
   const filteredAndSortedEpisodes = useMemo(() => {
     if (!episodeList || !Array.isArray(episodeList)) return [];
     let episodes = episodeList.filter(
       episode => episode && episode.title && episode.link,
     );
     if (searchText.trim()) {
-      episodes = episodes.filter(
-        episode =>
-          episode?.title?.toLowerCase().includes(searchText.toLowerCase()),
+      episodes = episodes.filter(episode =>
+        episode?.title?.toLowerCase().includes(searchText.toLowerCase()),
       );
     }
     if (sortOrder === 'desc') episodes = [...episodes].reverse();
@@ -422,8 +567,8 @@ const SeasonList: React.FC<SeasonListProps> = ({
       link => link && link.title && link.link,
     );
     if (searchText.trim()) {
-      links = links.filter(
-        link => link?.title?.toLowerCase().includes(searchText.toLowerCase()),
+      links = links.filter(link =>
+        link?.title?.toLowerCase().includes(searchText.toLowerCase()),
       );
     }
     if (sortOrder === 'desc') links = [...links].reverse();
@@ -439,11 +584,53 @@ const SeasonList: React.FC<SeasonListProps> = ({
     return hasLongTitles ? 'justify-start' : 'justify-center';
   }, [filteredAndSortedEpisodes, filteredAndSortedDirectLinks]);
 
-  const isCompleted = useCallback((link: string) => {
-    const watchProgress = JSON.parse(cacheStorage.getString(link) || '{}');
-    const percentage =
-      (watchProgress?.position / watchProgress?.duration) * 100;
-    return percentage > 85;
+  // NEW METHOD: Fetches dynamic formatted progress data
+  const getWatchProgressData = useCallback((link: string) => {
+    try {
+      const watchProgress = JSON.parse(cacheStorage.getString(link) || '{}');
+      if (watchProgress?.duration && watchProgress?.position !== undefined) {
+        const percentage =
+          (watchProgress.position / watchProgress.duration) * 100;
+        let text = '';
+
+        // Manual override for watched
+        if (watchProgress.duration === 1 && watchProgress.position >= 1) {
+          return {
+            isCompleted: true,
+            inProgress: false,
+            percentage: 100,
+            text: 'Watched',
+          };
+        }
+
+        // Watched automatically
+        if (percentage >= 85) {
+          return {
+            isCompleted: true,
+            inProgress: false,
+            percentage: Math.min(100, percentage),
+            text: 'Watched',
+          };
+        }
+
+        // Currently watching
+        if (percentage > 0) {
+          const format = (val: number) => {
+            let sec = val;
+            if (watchProgress.duration > 20000) sec = Math.floor(val / 1000); // converting ms to s
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = Math.floor(sec % 60);
+            if (h > 0) return `${h}h ${m}m`;
+            if (m > 0) return `${m}m`;
+            return `${s}s`;
+          };
+          text = `${format(watchProgress.position)} / ${format(watchProgress.duration)} (${Math.floor(percentage)}%)`;
+          return {isCompleted: false, inProgress: true, percentage, text};
+        }
+      }
+    } catch (e) {}
+    return {isCompleted: false, inProgress: false, percentage: 0, text: ''};
   }, []);
 
   const toggleSortOrder = useCallback(() => {
@@ -465,22 +652,20 @@ const SeasonList: React.FC<SeasonListProps> = ({
 
   const handleExternalPlayer = useCallback(
     async (link: string, type: string) => {
-      setVlcLoading(true);
+      setShowServerModal(true);
       setIsLoadingStreams(true);
       try {
         const streams = await fetchStreams(link, type, providerValue);
         if (!streams || streams.length === 0) {
+          setShowServerModal(false);
           ToastAndroid.show('No stream available', ToastAndroid.SHORT);
           return;
         }
         setExternalPlayerStreams([...streams]);
-        setIsLoadingStreams(false);
-        setVlcLoading(false);
-        setShowServerModal(true);
       } catch (error) {
+        setShowServerModal(false);
         ToastAndroid.show('Failed to load streams', ToastAndroid.SHORT);
       } finally {
-        setVlcLoading(false);
         setIsLoadingStreams(false);
       }
     },
@@ -622,7 +807,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
           type={type}
           providerValue={providerValue}
           playHandler={playHandler}
-          isCompleted={isCompleted}
+          getWatchProgressData={getWatchProgressData}
           stickyMenu={stickyMenu}
           titleAlignment={titleAlignment}
           onLongPressHandler={onLongPressHandler}
@@ -632,7 +817,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
       );
     },
     [
-      isCompleted,
+      getWatchProgressData,
       stickyMenu.link,
       titleAlignment,
       playHandler,
@@ -659,7 +844,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
           type={type}
           providerValue={providerValue}
           playHandler={playHandler}
-          isCompleted={isCompleted}
+          getWatchProgressData={getWatchProgressData}
           stickyMenu={stickyMenu}
           titleAlignment={titleAlignment}
           onLongPressHandler={onLongPressHandler}
@@ -669,7 +854,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
       );
     },
     [
-      isCompleted,
+      getWatchProgressData,
       stickyMenu.link,
       titleAlignment,
       playHandler,
@@ -893,7 +1078,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
           className="flex-1 justify-end items-center"
           onPress={() => setStickyMenu({active: false})}>
           <View className="w-full h-14 bg-quaternary flex-row justify-evenly items-center pt-2">
-            {isCompleted(stickyMenu.link || '') ? (
+            {getWatchProgressData(stickyMenu.link || '').isCompleted ? (
               <TouchableOpacity
                 className="flex-row justify-center items-center gap-2 p-2"
                 onPress={markAsUnwatched}>
@@ -918,6 +1103,61 @@ const SeasonList: React.FC<SeasonListProps> = ({
             </TouchableOpacity>
           </View>
         </Pressable>
+      </Modal>
+
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showServerModal}
+        onRequestClose={() => setShowServerModal(false)}>
+        <Pressable
+          className="flex-1 justify-end bg-black/60"
+          onPress={() => setShowServerModal(false)}>
+          <Pressable className="w-full bg-zinc-900 rounded-t-2xl p-5 min-h-[30%] max-h-[70%]">
+            <View className="flex-row justify-between items-center mb-4">
+              <Text className="text-white text-xl font-bold">
+                Select Server
+              </Text>
+              <TouchableOpacity onPress={() => setShowServerModal(false)}>
+                <Ionicons name="close" size={24} color="white" />
+              </TouchableOpacity>
+            </View>
+
+            {isLoadingStreams ? (
+              <View className="py-10 items-center justify-center">
+                <ActivityIndicator size="large" color={primary} />
+                <Text className="text-gray-400 mt-4 text-base">
+                  Fetching Streams...
+                </Text>
+              </View>
+            ) : externalPlayerStreams.length > 0 ? (
+              <FlatList
+                data={externalPlayerStreams}
+                keyExtractor={(item, index) => `server-${index}-${item.server}`}
+                renderItem={({item, index}) => renderServerItem(item, index)}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{paddingBottom: 20}}
+              />
+            ) : (
+              <View className="py-10 items-center justify-center">
+                <Text className="text-gray-400 text-base">
+                  No streams found.
+                </Text>
+              </View>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={vlcLoading} transparent={true} animationType="fade">
+        <View className="flex-1 bg-black/80 justify-center items-center">
+          <Animated.View style={{transform: [{rotate: vlcSpin}]}}>
+            <MaterialCommunityIcons name="vlc" size={80} color={primary} />
+          </Animated.View>
+          <Text className="text-white text-lg font-semibold mt-4">
+            Opening External Player...
+          </Text>
+        </View>
       </Modal>
     </View>
   );

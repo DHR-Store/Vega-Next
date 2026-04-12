@@ -12,6 +12,8 @@ import {cloudSyncService} from '../services/CloudSyncService';
 
 import useWatchHistoryStore from '../zustand/watchHistrory';
 import useWatchListStore from '../zustand/watchListStore';
+import { watchHistoryStorage } from '../storage/WatchHistoryStorage';
+import { watchListStorage } from '../storage/WatchListStorage';
 
 const SUPABASE_URL = 'YOUR_SUPABASE_URL';
 const SUPABASE_ANON_KEY =
@@ -92,12 +94,52 @@ class UserSession {
   private async _finaliseLogin(user: User): Promise<User> {
     this.currentUser = user;
     this.sessionStorage.set('currentUser', JSON.stringify(user));
+
+    // 1. CAPTURE GUEST/OFFLINE DATA BEFORE SWITCHING PARTITIONS
+    // We do this while still in the "Guest" storage partition
+    const guestHistory = watchHistoryStorage.getWatchHistory() || [];
+    const guestWatchList = watchListStorage.getWatchList() || [];
+
+    // 2. SWITCH STORAGE TO LOGGED-IN USER PARTITION
+    // This hides the guest data and activates the user's isolated storage
     storageService.setCurrentUser(user.id);
-    await cloudSyncService.pullUserData(user.id);
+
+    // 3. PULL EXISTING USER DATA FROM CLOUD 
+    // This populates the local User partition so it works offline later
+    await cloudSyncService.pullUserData(user.id).catch(e => console.log('Offline/Sync error', e));
+
+    // 4. MERGE GUEST DATA INTO USER PARTITION
+    if (guestHistory.length > 0) {
+      const userHistory = watchHistoryStorage.getWatchHistory() || [];
+      const userHistoryIds = new Set(userHistory.map(i => i.id));
+      
+      guestHistory.forEach(item => {
+        if (!userHistoryIds.has(item.id)) {
+          watchHistoryStorage.addToWatchHistory(item); // Adds missing offline history
+        }
+      });
+    }
+
+    if (guestWatchList.length > 0) {
+      const userList = watchListStorage.getWatchList() || [];
+      const userListLinks = new Set(userList.map(i => i.link));
+      
+      guestWatchList.forEach(item => {
+        if (!userListLinks.has(item.link)) {
+          watchListStorage.addToWatchList(item); // Adds missing offline bookmarks
+        }
+      });
+    }
+
+    // 5. PUSH THE FULLY MERGED DATA BACK TO THE CLOUD
+    await cloudSyncService.pushUserData(user.id).catch(() => {});
+
+    // 6. FINALIZE STORES
     rehydrateAllStores();
     cloudSyncService
       .saveUserProfile(user.id, {email: user.email, name: user.name, photo: user.photo})
       .catch(() => {});
+      
     return user;
   }
 

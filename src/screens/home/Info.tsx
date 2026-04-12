@@ -39,7 +39,7 @@ import {QueryErrorBoundary} from '../../components/ErrorBoundary';
 import YoutubePlayer from 'react-native-youtube-iframe';
 
 // --- CONFIGURATION ---
-const TMDB_API_KEY = 'YOUR_TMDB_API_KEY';
+const TMDB_API_KEY = '9d2bff12ed955c7f1f74b83187f188ae';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 // --- UTILITIES ---

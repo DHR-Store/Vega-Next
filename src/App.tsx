@@ -1,7 +1,9 @@
-// App.tsx (full file – replace your existing App.tsx)
+// App.tsx
+import 'react-native-gesture-handler'; // MUST BE AT THE VERY TOP
 import 'react-native-reanimated';
-import React, {useEffect, useState} from 'react';
-import OneSignal from 'react-native-onesignal';
+import React, {useEffect, useState, useCallback} from 'react';
+// Updated OneSignal import for Expo 54+
+import {OneSignal, LogLevel} from 'react-native-onesignal';
 import {check, request, PERMISSIONS, RESULTS} from 'react-native-permissions';
 import {
   View,
@@ -17,6 +19,7 @@ import {
   AppState,
 } from 'react-native';
 import {MaterialIcons} from '@expo/vector-icons';
+import {GestureHandlerRootView} from 'react-native-gesture-handler';
 
 import Home from './screens/home/Home';
 import Info from './screens/home/Info';
@@ -33,7 +36,6 @@ import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Entypo from '@expo/vector-icons/Entypo';
-import 'react-native-gesture-handler';
 import WebView from './screens/WebView';
 import SearchResults from './screens/SearchResults';
 import * as SystemUI from 'expo-system-ui';
@@ -84,6 +86,7 @@ import YTHome from './screens/yt/YTHome';
 import Login from './screens/Login';
 import {userSession, User} from './lib/services/login';
 import {downloadManager} from './lib/services/DownloadManager';
+
 enableScreens(true);
 enableFreeze(true);
 
@@ -129,10 +132,6 @@ export type TVRootStackParamList = {
 export type RootStackParamList = {
   Onboarding: undefined;
   Login: undefined;
-  // FIX: `MainStack` was missing from the type definition.
-  // Login.tsx calls `navigation.reset({ routes: [{ name: 'MainStack' }] })`
-  // and App.tsx registers `<Stack.Screen name="MainStack" ... />`, so this
-  // entry must exist to avoid TypeScript errors and incorrect navigation.
   MainStack: undefined;
   YTHome: undefined;
   TabStack: NavigatorScreenParams<TabStackParamList>;
@@ -152,6 +151,7 @@ export type RootStackParamList = {
   };
   WatchTrailer: {link?: string; videoId?: string};
   CastMovie: {castId: number; castName: string};
+  ChatHistory: undefined;
 };
 
 export type SearchStackParamList = {
@@ -223,31 +223,37 @@ const VegaMusicStack = createNativeStackNavigator<VegaMusicStackParamList>();
 const TVRootStack = createNativeStackNavigator<TVRootStackParamList>();
 const VegaTVStack = createNativeStackNavigator<VegaTVStackParamList>();
 
-/* ----------------- Custom TabBarButton ----------------- */
+/* ----------------- Custom TabBarButton (plain function – NO memo) ----------------- */
 function CustomTabBarButton(props: any) {
+  const handlePress = useCallback(
+    (e: any) => {
+      props.onPress?.(e);
+      if (
+        !props?.accessibilityState?.selected &&
+        settingsStorage.isHapticFeedbackEnabled()
+      ) {
+        RNReactNativeHapticFeedback.trigger('effectTick', {
+          enableVibrateFallback: true,
+          ignoreAndroidSystemSettings: false,
+        });
+      }
+    },
+    [props.onPress, props.accessibilityState?.selected],
+  );
+
   return (
     <TouchableOpacity
       accessibilityRole="button"
       accessibilityState={props.accessibilityState}
       style={props.style}
-      onPress={e => {
-        props.onPress && props.onPress(e);
-        if (
-          !props?.accessibilityState?.selected &&
-          settingsStorage.isHapticFeedbackEnabled()
-        ) {
-          RNReactNativeHapticFeedback.trigger('effectTick', {
-            enableVibrateFallback: true,
-            ignoreAndroidSystemSettings: false,
-          });
-        }
-      }}>
+      activeOpacity={0.7}
+      onPress={handlePress}>
       {props.children}
     </TouchableOpacity>
   );
 }
 
-/* ----------------- Stack screens ----------------- */
+/* ----------------- Stack screens (no freezeOnBlur) ----------------- */
 function HomeStackScreen() {
   return (
     <HomeStack.Navigator
@@ -255,7 +261,6 @@ function HomeStackScreen() {
         headerShown: false,
         animation: 'ios_from_right',
         animationDuration: 200,
-        freezeOnBlur: true,
       }}>
       <HomeStack.Screen name="Home" component={Home} />
       <HomeStack.Screen name="Info" component={Info} />
@@ -273,7 +278,6 @@ function SearchStackScreen() {
         headerShown: false,
         animation: 'ios_from_right',
         animationDuration: 200,
-        freezeOnBlur: true,
       }}>
       <SearchStack.Screen name="Search" component={Search} />
       <SearchStack.Screen name="ScrollList" component={ScrollList} />
@@ -293,7 +297,6 @@ function WatchListStackScreen() {
         headerShown: false,
         animation: 'ios_from_right',
         animationDuration: 200,
-        freezeOnBlur: true,
       }}>
       <WatchListStack.Screen name="WatchList" component={WatchList} />
       <WatchListStack.Screen name="Info" component={Info} />
@@ -308,7 +311,6 @@ function WatchHistoryStackScreen() {
         headerShown: false,
         animation: 'ios_from_right',
         animationDuration: 200,
-        freezeOnBlur: true,
       }}>
       <WatchHistoryStack.Screen name="WatchHistory" component={WatchHistory} />
       <WatchHistoryStack.Screen name="Info" component={Info} />
@@ -327,7 +329,6 @@ function SettingsStackScreen() {
         headerShown: false,
         animation: 'ios_from_right',
         animationDuration: 200,
-        freezeOnBlur: true,
       }}>
       <SettingsStack.Screen name="Settings" component={Settings} />
       <SettingsStack.Screen name="About" component={About} />
@@ -355,7 +356,6 @@ function VegaMusicStackNavigator() {
         headerShown: false,
         animation: 'ios_from_right',
         animationDuration: 200,
-        freezeOnBlur: true,
         contentStyle: {backgroundColor: 'transparent'},
       }}>
       <VegaMusicStack.Screen name="VegaMusicHome" component={View} />
@@ -371,7 +371,6 @@ function VegaTVStackNavigator() {
         headerShown: false,
         animation: 'ios_from_right',
         animationDuration: 200,
-        freezeOnBlur: true,
         contentStyle: {backgroundColor: 'transparent'},
       }}>
       <VegaTVStack.Screen name="LiveTVScreen" component={LiveTVScreen} />
@@ -384,26 +383,21 @@ function VegaTVStackNavigator() {
   );
 }
 
-/* ----------------- Tab stack ----------------- */
+/* ----------------- Tab stack (detachInactiveScreens = false) ----------------- */
 function TabStackScreen() {
   const {primary} = useThemeStore(state => state);
   const {width} = useWindowDimensions();
   const isLargeScreen = width > 768;
   const [showTabBarLabels, setShowTabBarLabels] = useState(
-    Boolean(MMKV.getBool('showTabBarLables')) || false,
+    () => MMKV.getBool('showTabBarLables') ?? false,
   );
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   useEffect(() => {
-    // Function to fetch current user data
-    const updateSession = () => {
-      setCurrentUser(userSession.getCurrentUser());
-    };
+    const updateSession = () => setCurrentUser(userSession.getCurrentUser());
 
-    // Initial fetch
     updateSession();
 
-    // Listeners for live updates across the app
     const loginSub = DeviceEventEmitter.addListener(
       'userLoggedIn',
       updateSession,
@@ -416,8 +410,7 @@ function TabStackScreen() {
       'profilePhotoChanged',
       updateSession,
     );
-
-    const subscription = DeviceEventEmitter.addListener(
+    const labelSub = DeviceEventEmitter.addListener(
       'changeTabBarLabel',
       newValue => {
         setShowTabBarLabels(newValue === true || newValue === 'true');
@@ -425,16 +418,16 @@ function TabStackScreen() {
     );
 
     return () => {
-      subscription.remove();
       loginSub.remove();
       logoutSub.remove();
       photoSub.remove();
+      labelSub.remove();
     };
   }, []);
 
   return (
     <Tab.Navigator
-      detachInactiveScreens={true}
+      detachInactiveScreens={false} // Keep all tabs in memory for smooth switching
       screenOptions={{
         animation: 'shift',
         tabBarLabelPosition: 'below-icon',
@@ -442,7 +435,6 @@ function TabStackScreen() {
         popToTopOnBlur: false,
         tabBarPosition: isLargeScreen ? 'left' : 'bottom',
         headerShown: false,
-        freezeOnBlur: true,
         tabBarActiveTintColor: primary,
         tabBarInactiveTintColor: '#dadde3',
         tabBarShowLabel: showTabBarLabels,
@@ -517,12 +509,10 @@ function TabStackScreen() {
         options={{
           title: 'Settings',
           tabBarIcon: ({focused, color, size}) => {
-            // FIXED: Check if user exists & has a photo
             const customSize = size + 5;
             const photoUri =
               currentUser?.photo || userSession.getBestPhotoUri();
 
-            // SHOW AVATAR IF LOGGED IN (removed the !focused check)
             if (photoUri) {
               return (
                 <Animated.View
@@ -533,7 +523,6 @@ function TabStackScreen() {
                       width: customSize,
                       height: customSize,
                       borderRadius: size / 2,
-                      // Optional: Highlight border when focused
                       borderWidth: focused ? 2 : 0,
                       borderColor: focused ? primary : 'transparent',
                     }}
@@ -542,7 +531,6 @@ function TabStackScreen() {
               );
             }
 
-            // FALLBACK: SHOW SETTINGS ICON IF NOT LOGGED IN
             return (
               <Animated.View style={{transform: [{scale: focused ? 1.1 : 1}]}}>
                 {focused ? (
@@ -558,6 +546,7 @@ function TabStackScreen() {
     </Tab.Navigator>
   );
 }
+
 /* ----------------- Music / TV roots ----------------- */
 function MusicRootStackScreen() {
   return (
@@ -566,7 +555,6 @@ function MusicRootStackScreen() {
         headerShown: false,
         animation: 'ios_from_right',
         animationDuration: 200,
-        freezeOnBlur: true,
         contentStyle: {backgroundColor: 'transparent'},
       }}>
       <MusicRootStack.Screen
@@ -584,7 +572,6 @@ function TVRootStackScreen() {
         headerShown: false,
         animation: 'ios_from_right',
         animationDuration: 200,
-        freezeOnBlur: true,
         contentStyle: {backgroundColor: 'transparent'},
       }}>
       <TVRootStack.Screen name="VegaTVStack" component={VegaTVStackNavigator} />
@@ -638,28 +625,18 @@ const App = () => {
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const navigationRef = useNavigationContainerRef();
   const [currentRouteName, setCurrentRouteName] = useState<string>('');
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null); // null = still checking
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
 
   SystemUI.setBackgroundColorAsync('black');
 
-  // Check login status on mount (synchronous — userSession.loadSession() runs
-  // in the constructor, so isLoggedIn() is reliable immediately).
   useEffect(() => {
     setIsLoggedIn(userSession.isLoggedIn());
   }, []);
 
-  // ─── FIX 1: Reset stale downloads on every app launch ───────────────────────
-  // When app is killed mid-download, MMKV still stores status='downloading'.
-  // On restart nothing is actually running, so flip them to 'paused' so
-  // the user can see which ones need to be resumed.
   useEffect(() => {
     downloadManager.resetStaleDownloads();
   }, []);
 
-  // ─── FIX 2: Sync download state when app comes back to foreground ────────────
-  // The Notifee Foreground Service may update download progress while the
-  // app UI is backgrounded. When user opens app again, reload from MMKV
-  // so the Downloads screen shows correct up-to-date state.
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
       if (nextState === 'active') {
@@ -669,7 +646,6 @@ const App = () => {
     return () => subscription.remove();
   }, []);
 
-  // Notification permission
   useEffect(() => {
     const checkNotificationPermission = async () => {
       const status = await check(PERMISSIONS.ANDROID.POST_NOTIFICATIONS);
@@ -685,37 +661,32 @@ const App = () => {
     if (result === RESULTS.GRANTED) setShowNotificationModal(false);
   };
 
-  // OneSignal init
   useEffect(() => {
     try {
-      const ONESIGNAL_APP_ID = 'fc34c762-8fbb-45c8-aeb6-b04afbe7c930';
-      if (!OneSignal) {
-        console.warn('OneSignal is undefined.');
-        return;
-      }
-      OneSignal.setAppId(ONESIGNAL_APP_ID);
-      OneSignal.promptForPushNotificationsWithUserResponse(response =>
-        console.log('OneSignal prompt response:', response),
+      OneSignal.Debug.setLogLevel(LogLevel.Verbose);
+      OneSignal.initialize('fc34c762-8fbb-45c8-aeb6-b04afbe7c930');
+      OneSignal.Notifications.requestPermission(false);
+      OneSignal.Notifications.addEventListener(
+        'foregroundWillDisplay',
+        event => {
+          if (Platform.OS === 'android') {
+            event.preventDefault();
+            event.getNotification().display({
+              android: {
+                smallIcon: 'ic_stat_onesignal_default',
+              },
+            });
+          }
+        },
       );
-      OneSignal.setNotificationWillShowInForegroundHandler(event => {
-        const notif = event.getNotification();
-        if (Platform.OS === 'android') {
-          notif.android = {
-            ...notif.android,
-            smallIcon: 'ic_stat_onesignal_default',
-          };
-        }
-        event.complete(notif);
+      OneSignal.Notifications.addEventListener('click', event => {
+        console.log('OneSignal notification clicked:', event);
       });
-      OneSignal.setNotificationOpenedHandler(opened =>
-        console.log('OneSignal notification opened:', opened),
-      );
     } catch (err) {
-      console.error('OneSignal init error:', err);
+      console.error('OneSignal initialization error:', err);
     }
   }, []);
 
-  // Notifee action handler
   async function actionHandler({
     type,
     detail,
@@ -763,25 +734,23 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
-  // Providers update service
   useEffect(() => {
     updateProvidersService.startAutomaticUpdateCheck();
     return () => updateProvidersService.stopAutomaticUpdateCheck();
   }, []);
 
-  // Auto update check
   useEffect(() => {
     if (settingsStorage.isAutoCheckUpdateEnabled()) {
       checkForUpdate(() => {}, settingsStorage.isAutoDownloadEnabled(), false);
     }
   }, []);
 
-  // User ping (device ID)
   const generateUUID = () => {
     const S4 = () =>
       (((1 + Math.random()) * 0x10000) | 0).toString(16).substring(1);
     return `${S4()}${S4()}-${S4()}-${S4()}-${S4()}-${S4()}${S4()}${S4()}`;
   };
+
   const sendUserPing = async () => {
     const API_URL = 'http://10.0.2.2:3000/api/user-ping';
     try {
@@ -799,11 +768,11 @@ const App = () => {
       console.error('Failed to log user activity:', error);
     }
   };
+
   useEffect(() => {
     sendUserPing();
   }, []);
 
-  // Determine main component based on appMode
   let MainComponent = TabStackScreen;
   if (appMode === 'video') MainComponent = TabStackScreen;
   else if (appMode === 'music') MainComponent = MusicRootStackScreen;
@@ -811,96 +780,106 @@ const App = () => {
 
   const hasSeenOnboarding = MMKV.getBool('hasSeenOnboarding') === true;
 
-  // Wait for login check to complete before rendering navigation
   let initialRoute: keyof RootStackParamList = hasSeenOnboarding
     ? 'MainStack'
     : 'Onboarding';
 
   return (
-    <GlobalErrorBoundary>
-      <SafeAreaProvider>
-        <QueryClientProvider client={queryClient}>
-          <SafeAreaView
-            edges={{right: 'off', top: 'off', left: 'off', bottom: 'additive'}}
-            className="flex-1"
-            style={{backgroundColor: 'black'}}>
-            <NavigationContainer
-              ref={navigationRef}
-              onReady={async () => {
-                await BootSplash.hide({fade: true});
-                setCurrentRouteName(
-                  navigationRef.getCurrentRoute()?.name || '',
-                );
+    <GestureHandlerRootView style={{flex: 1}}>
+      <GlobalErrorBoundary>
+        <SafeAreaProvider>
+          <QueryClientProvider client={queryClient}>
+            <SafeAreaView
+              edges={{
+                right: 'off',
+                top: 'off',
+                left: 'off',
+                bottom: 'additive',
               }}
-              onStateChange={() => {
-                const currentRoute =
-                  navigationRef.getCurrentRoute()?.name || '';
-                if (currentRouteName !== currentRoute)
-                  setCurrentRouteName(currentRoute);
-              }}
-              theme={{
-                fonts: {
-                  regular: {fontFamily: 'Inter_400Regular', fontWeight: '400'},
-                  medium: {fontFamily: 'Inter_500Medium', fontWeight: '500'},
-                  bold: {fontFamily: 'Inter_700Bold', fontWeight: '700'},
-                  heavy: {fontFamily: 'Inter_800ExtraBold', fontWeight: '800'},
-                },
-                dark: true,
-                colors: {
-                  background: 'transparent',
-                  card: 'black',
-                  primary: primary,
-                  text: 'white',
-                  border: 'black',
-                  notification: primary,
-                },
-              }}>
-              <Stack.Navigator
-                initialRouteName={initialRoute}
-                screenOptions={{
-                  headerShown: false,
-                  animation: 'ios_from_right',
-                  animationDuration: 200,
-                  freezeOnBlur: true,
-                  contentStyle: {backgroundColor: 'transparent'},
+              className="flex-1"
+              style={{backgroundColor: 'black'}}>
+              <NavigationContainer
+                ref={navigationRef}
+                onReady={async () => {
+                  await BootSplash.hide({fade: true});
+                  setCurrentRouteName(
+                    navigationRef.getCurrentRoute()?.name || '',
+                  );
+                }}
+                onStateChange={() => {
+                  const currentRoute =
+                    navigationRef.getCurrentRoute()?.name || '';
+                  if (currentRouteName !== currentRoute)
+                    setCurrentRouteName(currentRoute);
+                }}
+                theme={{
+                  fonts: {
+                    regular: {
+                      fontFamily: 'Inter_400Regular',
+                      fontWeight: '400',
+                    },
+                    medium: {fontFamily: 'Inter_500Medium', fontWeight: '500'},
+                    bold: {fontFamily: 'Inter_700Bold', fontWeight: '700'},
+                    heavy: {
+                      fontFamily: 'Inter_800ExtraBold',
+                      fontWeight: '800',
+                    },
+                  },
+                  dark: true,
+                  colors: {
+                    background: 'transparent',
+                    card: 'black',
+                    primary: primary,
+                    text: 'white',
+                    border: 'black',
+                    notification: primary,
+                  },
                 }}>
-                <Stack.Screen name="Onboarding" component={Onboarding} />
-                <Stack.Screen name="Login" component={Login} />
-                {/* MainStack is the post-login root. It's typed and registered correctly. */}
-                <Stack.Screen name="MainStack" component={MainComponent} />
-                <Stack.Screen
-                  name="Player"
-                  component={Player}
-                  options={{orientation: 'landscape'}}
-                />
-                <Stack.Screen name="WatchTrailer" component={WebView} />
-                <Stack.Screen name="CastMovie" component={CastMovie} />
-                <Stack.Screen name="ChatHistory" component={ChatHistory} />
-                <Stack.Screen
-                  name="YTHome"
-                  component={YTHome}
-                  options={{headerShown: false}}
-                />
-              </Stack.Navigator>
-            </NavigationContainer>
+                <Stack.Navigator
+                  initialRouteName={initialRoute}
+                  screenOptions={{
+                    headerShown: false,
+                    animation: 'ios_from_right',
+                    animationDuration: 200,
+                    contentStyle: {backgroundColor: 'transparent'},
+                  }}>
+                  <Stack.Screen name="Onboarding" component={Onboarding} />
+                  <Stack.Screen name="Login" component={Login} />
+                  <Stack.Screen name="MainStack" component={MainComponent} />
+                  <Stack.Screen
+                    name="Player"
+                    component={Player}
+                    options={{orientation: 'landscape'}}
+                  />
+                  <Stack.Screen name="WatchTrailer" component={WebView} />
+                  <Stack.Screen name="CastMovie" component={CastMovie} />
+                  <Stack.Screen name="ChatHistory" component={ChatHistory} />
+                  <Stack.Screen
+                    name="YTHome"
+                    component={YTHome}
+                    options={{headerShown: false}}
+                  />
+                </Stack.Navigator>
+              </NavigationContainer>
 
-            <AI
-              currentRoute={currentRouteName}
-              onNavigateToHistory={() => {
-                if (navigationRef.isReady())
-                  navigationRef.navigate('ChatHistory' as never);
-              }}
-            />
+              <AI
+                currentRoute={currentRouteName}
+                onNavigateToHistory={() => {
+                  if (navigationRef.isReady())
+                    navigationRef.navigate('ChatHistory' as never);
+                }}
+              />
 
-            <NotificationPromptModal
-              isVisible={showNotificationModal}
-              onClose={() => setShowNotificationModal(false)}
-              onAllow={handleAllowNotifications}
-            />
-          </SafeAreaView>
-        </QueryClientProvider>
-      </SafeAreaProvider>
-    </GlobalErrorBoundary>
+              <NotificationPromptModal
+                isVisible={showNotificationModal}
+                onClose={() => setShowNotificationModal(false)}
+                onAllow={handleAllowNotifications}
+              />
+            </SafeAreaView>
+          </QueryClientProvider>
+        </SafeAreaProvider>
+      </GlobalErrorBoundary>
+    </GestureHandlerRootView>
   );
 };
 

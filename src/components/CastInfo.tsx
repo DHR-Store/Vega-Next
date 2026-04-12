@@ -204,8 +204,8 @@ export default function CastInfo({
                 index % 3 === 0
                   ? 'text-red-500'
                   : index % 3 === 1
-                  ? 'text-blue-500'
-                  : 'text-green-500'
+                    ? 'text-blue-500'
+                    : 'text-green-500'
               }`}>
               {actor}
             </Text>

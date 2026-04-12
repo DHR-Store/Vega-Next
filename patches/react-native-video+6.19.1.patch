@@ -1,0 +1,297 @@
+diff --git a/node_modules/react-native-video/android/build.gradle b/node_modules/react-native-video/android/build.gradle
+index 748b799..b4afeae 100644
+--- a/node_modules/react-native-video/android/build.gradle
++++ b/node_modules/react-native-video/android/build.gradle
+@@ -238,6 +238,7 @@ dependencies {
+         implementation(project(":media-lib-exoplayer"))
+     } else {
+         implementation "androidx.media3:media3-exoplayer:$media3_version"
++        implementation "org.jellyfin.media3:media3-ffmpeg-decoder:${media3_version}+1"
+     }
+ 
+     if (ExoplayerDependencies["useExoplayerSmoothStreaming"]) {
+diff --git a/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ReactExoplayerView.java b/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ReactExoplayerView.java
+index e16ac96..84c7647 100644
+--- a/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ReactExoplayerView.java
++++ b/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ReactExoplayerView.java
+@@ -60,6 +60,7 @@ import androidx.media3.datasource.HttpDataSource;
+ import androidx.media3.exoplayer.DefaultLoadControl;
+ import androidx.media3.exoplayer.DefaultRenderersFactory;
+ import androidx.media3.exoplayer.ExoPlayer;
++import androidx.media3.exoplayer.RendererCapabilities;
+ import androidx.media3.exoplayer.dash.DashMediaSource;
+ import androidx.media3.exoplayer.dash.DashUtil;
+ import androidx.media3.exoplayer.dash.DefaultDashChunkSource;
+@@ -234,6 +235,7 @@ public class ReactExoplayerView extends FrameLayout implements
+     private boolean isSeeking = false;
+     private long seekPosition = -1;
+     private boolean hasVideoEnded = false;
++    private boolean hasRetriedUnsupportedAudioTrack = false;
+ 
+     // Props from React
+     private Source source = new Source();
+@@ -715,6 +717,7 @@ public class ReactExoplayerView extends FrameLayout implements
+     private void initializePlayerCore(ReactExoplayerView self) {
+         ExoTrackSelection.Factory videoTrackSelectionFactory = new AdaptiveTrackSelection.Factory();
+         self.trackSelector = new DefaultTrackSelector(getContext(), videoTrackSelectionFactory);
++        hasRetriedUnsupportedAudioTrack = false;
+         self.trackSelector.setParameters(trackSelector.buildUponParameters()
+                 .setMaxVideoBitrate(maxBitRate == 0 ? Integer.MAX_VALUE : maxBitRate));
+ 
+@@ -732,7 +735,7 @@ public class ReactExoplayerView extends FrameLayout implements
+ 
+         DefaultRenderersFactory renderersFactory =
+                 new DefaultRenderersFactory(getContext())
+-                        .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
++                        .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+                         .setEnableDecoderFallback(true)
+                         .forceEnableMediaCodecAsynchronousQueueing();
+ 
+@@ -1954,6 +1957,12 @@ public class ReactExoplayerView extends FrameLayout implements
+     public void onPlayerError(@NonNull PlaybackException e) {
+         String errorString = "ExoPlaybackException: " + PlaybackException.getErrorCodeName(e.errorCode);
+         String errorCode = "2" + e.errorCode;
++        if (e.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED
++                && !hasRetriedUnsupportedAudioTrack
++                && recoverFromUnsupportedAudioTrack()) {
++            hasRetriedUnsupportedAudioTrack = true;
++            return;
++        }
+         switch(e.errorCode) {
+             case PlaybackException.ERROR_CODE_DRM_DEVICE_REVOKED:
+             case PlaybackException.ERROR_CODE_DRM_LICENSE_ACQUISITION_FAILED:
+@@ -2317,6 +2326,15 @@ public class ReactExoplayerView extends FrameLayout implements
+             groupIndex = getGroupIndexForDefaultLocale(groups);
+         }
+ 
++        if (trackType == C.TRACK_TYPE_AUDIO) {
++            groupIndex = getPreferredSupportedAudioGroupIndex(
++                    info,
++                    rendererIndex,
++                    groups,
++                    type,
++                    value);
++        }
++
+         if (groupIndex == C.INDEX_UNSET && trackType == C.TRACK_TYPE_VIDEO && groups.length != 0) { // Video auto
+             // Add all tracks as valid options for ABR to choose from
+             TrackGroup group = groups.get(0);
+@@ -2359,7 +2377,7 @@ public class ReactExoplayerView extends FrameLayout implements
+             DefaultTrackSelector.Parameters.Builder selectionParameters = trackSelector.getParameters()
+                     .buildUpon()
+                     .setExceedAudioConstraintsIfNecessary(true)
+-                    .setExceedRendererCapabilitiesIfNecessary(true)
++                    .setExceedRendererCapabilitiesIfNecessary(trackType != C.TRACK_TYPE_AUDIO)
+                     .setExceedVideoConstraintsIfNecessary(true)
+                     .setRendererDisabled(rendererIndex, false);
+ 
+@@ -2429,6 +2447,209 @@ public class ReactExoplayerView extends FrameLayout implements
+         return groupIndex;
+     }
+ 
++    private static final java.util.Set<String> PASSTHROUGH_AUDIO_MIME_TYPES =
++            new java.util.HashSet<>(java.util.Arrays.asList(
++                    "audio/eac3",
++                    "audio/eac3-joc",
++                    "audio/ac3",
++                    "audio/true-hd"
++            ));
++
++    private static final boolean FFMPEG_AUDIO_AVAILABLE;
++    static {
++        boolean available = false;
++        try {
++            available = androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable();
++        } catch (NoClassDefFoundError | Exception ignored) {}
++        FFMPEG_AUDIO_AVAILABLE = available;
++    }
++
++    private boolean isPassthroughOnlyMimeType(String mimeType) {
++        if (mimeType == null || !PASSTHROUGH_AUDIO_MIME_TYPES.contains(mimeType)) {
++            return false;
++        }
++        if (FFMPEG_AUDIO_AVAILABLE) {
++            return false;
++        }
++        try {
++            java.util.List<MediaCodecInfo> decoders =
++                    MediaCodecUtil.getDecoderInfos(mimeType, false, false);
++            for (MediaCodecInfo codecInfo : decoders) {
++                if (codecInfo.softwareOnly) {
++                    return false;
++                }
++            }
++        } catch (MediaCodecUtil.DecoderQueryException ignored) {}
++        return true;
++    }
++
++    private boolean isTrackSupported(
++            MappingTrackSelector.MappedTrackInfo info,
++            int rendererIndex,
++            int groupIndex,
++            int trackIndex
++    ) {
++        int support = RendererCapabilities.getFormatSupport(
++                info.getTrackSupport(rendererIndex, groupIndex, trackIndex));
++        if (support != C.FORMAT_HANDLED && support != C.FORMAT_EXCEEDS_CAPABILITIES) {
++            return false;
++        }
++        Format format = info.getTrackGroups(rendererIndex).get(groupIndex).getFormat(trackIndex);
++        if (isPassthroughOnlyMimeType(format.sampleMimeType)) {
++            return false;
++        }
++        return true;
++    }
++
++    private boolean isTrackGroupSupported(
++            MappingTrackSelector.MappedTrackInfo info,
++            int rendererIndex,
++            TrackGroupArray groups,
++            int groupIndex
++    ) {
++        if (groupIndex == C.INDEX_UNSET || groupIndex >= groups.length) {
++            return false;
++        }
++
++        TrackGroup group = groups.get(groupIndex);
++        for (int trackIndex = 0; trackIndex < group.length; trackIndex++) {
++            if (isTrackSupported(info, rendererIndex, groupIndex, trackIndex)) {
++                return true;
++            }
++        }
++
++        return false;
++    }
++
++    private int getFirstSupportedGroupIndex(
++            MappingTrackSelector.MappedTrackInfo info,
++            int rendererIndex,
++            TrackGroupArray groups
++    ) {
++        for (int groupIndex = 0; groupIndex < groups.length; groupIndex++) {
++            if (isTrackGroupSupported(info, rendererIndex, groups, groupIndex)) {
++                return groupIndex;
++            }
++        }
++
++        return C.INDEX_UNSET;
++    }
++
++    private int getPreferredSupportedAudioGroupIndex(
++            MappingTrackSelector.MappedTrackInfo info,
++            int rendererIndex,
++            TrackGroupArray groups,
++            String type,
++            String value
++    ) {
++        if (groups.length == 0) {
++            return C.INDEX_UNSET;
++        }
++
++        String resolvedType = TextUtils.isEmpty(type) ? "default" : type;
++        int preferredGroupIndex = C.INDEX_UNSET;
++
++        if ("language".equals(resolvedType)) {
++            for (int groupIndex = 0; groupIndex < groups.length; groupIndex++) {
++                Format format = groups.get(groupIndex).getFormat(0);
++                if (format.language != null
++                        && format.language.equals(value)
++                        && isTrackGroupSupported(info, rendererIndex, groups, groupIndex)) {
++                    preferredGroupIndex = groupIndex;
++                    break;
++                }
++            }
++        } else if ("title".equals(resolvedType)) {
++            for (int groupIndex = 0; groupIndex < groups.length; groupIndex++) {
++                Format format = groups.get(groupIndex).getFormat(0);
++                if (format.label != null
++                        && format.label.equals(value)
++                        && isTrackGroupSupported(info, rendererIndex, groups, groupIndex)) {
++                    preferredGroupIndex = groupIndex;
++                    break;
++                }
++            }
++        } else if ("index".equals(resolvedType)) {
++            int requestedIndex = ReactBridgeUtils.safeParseInt(value, C.INDEX_UNSET);
++            if (requestedIndex != C.INDEX_UNSET
++                    && requestedIndex < groups.length
++                    && isTrackGroupSupported(info, rendererIndex, groups, requestedIndex)) {
++                preferredGroupIndex = requestedIndex;
++            }
++        } else {
++            int localeGroupIndex = getGroupIndexForDefaultLocale(groups);
++            if (isTrackGroupSupported(info, rendererIndex, groups, localeGroupIndex)) {
++                preferredGroupIndex = localeGroupIndex;
++            }
++        }
++
++        if (preferredGroupIndex != C.INDEX_UNSET) {
++            return preferredGroupIndex;
++        }
++
++        return getFirstSupportedGroupIndex(info, rendererIndex, groups);
++    }
++
++    private int getSelectedGroupIndex(TrackSelection selection, TrackGroupArray groups) {
++        if (selection == null) {
++            return C.INDEX_UNSET;
++        }
++
++        TrackGroup selectedGroup = selection.getTrackGroup();
++        for (int groupIndex = 0; groupIndex < groups.length; groupIndex++) {
++            if (groups.get(groupIndex) == selectedGroup) {
++                return groupIndex;
++            }
++        }
++
++        return C.INDEX_UNSET;
++    }
++
++    private boolean recoverFromUnsupportedAudioTrack() {
++        if (player == null || trackSelector == null) {
++            return false;
++        }
++
++        MappingTrackSelector.MappedTrackInfo info = trackSelector.getCurrentMappedTrackInfo();
++        int rendererIndex = getTrackRendererIndex(C.TRACK_TYPE_AUDIO);
++        if (info == null || rendererIndex == C.INDEX_UNSET) {
++            return false;
++        }
++
++        TrackGroupArray groups = info.getTrackGroups(rendererIndex);
++        if (groups.length == 0) {
++            return false;
++        }
++
++        TrackSelection currentSelection = player.getCurrentTrackSelections().get(rendererIndex);
++        int currentGroupIndex = getSelectedGroupIndex(currentSelection, groups);
++        if (isTrackGroupSupported(info, rendererIndex, groups, currentGroupIndex)) {
++            return false;
++        }
++
++        int fallbackGroupIndex = getPreferredSupportedAudioGroupIndex(
++                info,
++                rendererIndex,
++                groups,
++                audioTrackType,
++                audioTrackValue);
++
++        if (fallbackGroupIndex == C.INDEX_UNSET || fallbackGroupIndex == currentGroupIndex) {
++            return false;
++        }
++
++        long currentPosition = Math.max(player.getCurrentPosition(), 0);
++        boolean playWhenReady = player.getPlayWhenReady();
++        DebugLog.w(TAG, "Retrying playback with supported audio track group=" + fallbackGroupIndex);
++        setSelectedAudioTrack("index", String.valueOf(fallbackGroupIndex));
++        player.prepare();
++        if (currentPosition > 0) {
++            player.seekTo(currentPosition);
++        }
++        player.setPlayWhenReady(playWhenReady);
++        return true;
++    }
++
+     public void setSelectedVideoTrack(String type, String value) {
+         videoTrackType = type;
+         videoTrackValue = value;
