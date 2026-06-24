@@ -28,8 +28,8 @@ android {
         applicationId 'com.vega.next'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 153
-        versionName "3.5.4"   // <-- change this to "5.3" if you want "release5.3"
+        versionCode 155
+        versionName "3.5.6"
 
         ndk {
             abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
@@ -58,11 +58,15 @@ android {
             keyPassword 'android'
         }
         release {
-            // These are read from ~/.gradle/gradle.properties (never commit to git)
+            // These are read from ~/.gradle/gradle.properties
             storeFile file(MYAPP_UPLOAD_STORE_FILE)
             storePassword MYAPP_UPLOAD_STORE_PASSWORD
             keyAlias MYAPP_UPLOAD_KEY_ALIAS
             keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+            
+            // FIXED: Speeds up installation validation and prevents file-by-file unpack scanning
+            v1SigningEnabled true
+            v2SigningEnabled true
         }
     }
 
@@ -72,43 +76,39 @@ android {
         }
 
         release {
-            // ✅ CRITICAL: must be signed with your OWN keystore (not debug)
             signingConfig signingConfigs.release
 
-            // ✅ Enable R8 full-mode shrinking — reduces Play Protect suspicion
+            // Enable R8 full-mode shrinking
             minifyEnabled true
 
-            // ✅ Shrink unused resources — smaller APK, less scan surface
+            // Shrink unused resources
             shrinkResources true
 
-            // ✅ Use R8 (default in modern AGP) — stronger than ProGuard
+            // Use R8
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
 
-            // ✅ Crush PNGs to reduce size
+            // Crush PNGs to reduce size
             crunchPngs true
 
-            // ✅ Remove debug symbols from native libs in release
+            // Remove debug symbols from native libs in release
             debuggable false
 
-            // ✅ Jni debug info stripped
+            // Jni debug info stripped
             jniDebuggable false
 
-            // ✅ Render script — keep optimised
+            // Render script — keep optimised
             renderscriptDebuggable false
             renderscriptOptimLevel 3
 
-            // ✅ Pseudo-locales bloat removed
+            // Pseudo-locales bloat removed
             pseudoLocalesEnabled false
         }
     }
 
-    // ========== CUSTOM APK OUTPUT FILENAME ==========
     applicationVariants.all { variant ->
         variant.outputs.each { output ->
             if (variant.buildType.name == "release") {
-                // Get the ABI filter (e.g., "armeabi-v7a") or "universal" for the fat APK
                 def abi = output.getFilter(com.android.build.OutputFile.ABI) ?: "universal"
-                // Set the filename: Vega-Next-<abi>-release<versionName>.apk
                 output.outputFileName = "Vega-Next-${abi}-release${variant.versionName}.apk"
             }
         }
@@ -118,13 +118,10 @@ android {
         jniLibs {
             useLegacyPackaging (findProperty('expo.useLegacyPackaging')?.toBoolean() ?: false)
         }
-        // ✅ Strip duplicate native libs that can cause bloat / scan flags
         pickFirst '**/libc++_shared.so'
         pickFirst '**/libfbjni.so'
     }
 
-    // ✅ Remove unused language resources (keeps only English by default)
-    // Add more locales your app actually supports
     bundle {
         language {
             enableSplit = true
@@ -141,7 +138,6 @@ android {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
 
-    // ✅ Compile with Java 17 for modern toolchain
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17

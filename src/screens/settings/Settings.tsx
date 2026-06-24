@@ -16,6 +16,7 @@ import {
   Platform,
 } from 'react-native';
 import React, {useCallback, useMemo, useEffect, useState, useRef} from 'react';
+import {MMKV} from '../../lib/Mmkv';
 import {
   settingsStorage,
   cacheStorageService,
@@ -46,7 +47,6 @@ import {check, request, PERMISSIONS, RESULTS} from 'react-native-permissions';
 
 import RenderProviderFlagIcon from '../../components/RenderProviderFLagIcon';
 import useAppModeStore from '../../lib/zustand/appModeStore';
-import {MMKV} from '../../lib/Mmkv';
 import {DiscordRPC} from '../../lib/services/DiscordRPC';
 import {WebView} from 'react-native-webview';
 import {userSession, User} from '../../lib/services/login';
@@ -226,6 +226,46 @@ const Section = ({children}: {children: React.ReactNode}) => (
 );
 
 const Settings = ({navigation}: Props) => {
+  const [appLockEnabled, setAppLockEnabled] = useState(
+    MMKV.getBool('appLockEnabled') || false,
+  );
+  const [biometricEnabled, setBiometricEnabled] = useState(
+    MMKV.getBool('biometricEnabled') || false,
+  );
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [tempPin, setTempPin] = useState('');
+
+  const handleToggleAppLock = (value: boolean) => {
+    if (value) {
+      setTempPin('');
+      setShowPinModal(true);
+    } else {
+      setAppLockEnabled(false);
+      setBiometricEnabled(false);
+      MMKV.setBool('appLockEnabled', false);
+      MMKV.setBool('biometricEnabled', false);
+      MMKV.delete('appLockPin');
+      showToast('App Lock Disabled');
+    }
+  };
+
+  const handleToggleBiometric = async (value: boolean) => {
+    setBiometricEnabled(value);
+    MMKV.setBool('biometricEnabled', value);
+  };
+
+  const submitPin = () => {
+    if (tempPin.length === 4) {
+      MMKV.setString('appLockPin', tempPin);
+      MMKV.setBool('appLockEnabled', true);
+      setAppLockEnabled(true);
+      setShowPinModal(false);
+      showToast('App Lock Enabled Successfully');
+    } else {
+      showToast('PIN must be 4 digits');
+    }
+  };
+
   const tabNavigation =
     useNavigation<NativeStackNavigationProp<TabStackParamList>>();
   const rootNavigation =
@@ -236,7 +276,6 @@ const Settings = ({navigation}: Props) => {
   );
   const {clearHistory} = useWatchHistoryStore(state => state);
   const {appMode, setAppMode} = useAppModeStore(state => state);
-
   // States
   const [watchTogetherMode, setWatchTogetherMode] = useState(
     getWatchTogetherMode(),
@@ -993,179 +1032,6 @@ const Settings = ({navigation}: Props) => {
           </View>
         </Modal>
 
-        {/* YouTube Integration */}
-        <Section>
-          <View className="mb-6 flex-col gap-3">
-            <Text className="text-gray-400 text-sm mb-1">YouTube</Text>
-            <View className="bg-[#1A1A1A] rounded-xl overflow-hidden p-4">
-              <View className="flex-row items-center justify-between mb-3">
-                <View className="flex-row items-center">
-                  {ytProfilePic ? (
-                    <Image
-                      source={{uri: ytProfilePic}}
-                      style={{width: 32, height: 32, borderRadius: 16}}
-                    />
-                  ) : (
-                    <AntDesign name="youtube" size={22} color="#FF0000" />
-                  )}
-                  <Text className="text-white ml-3 text-base font-medium">
-                    {ytProfilePic
-                      ? 'YouTube Account Connected'
-                      : 'YouTube Account & Mod'}
-                  </Text>
-                </View>
-
-                {ytProfilePic && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      setYtProfilePic(null);
-                      MMKV.delete('ytProfilePic');
-                      showToast('Logged out of YouTube Mod');
-                    }}>
-                    <Text className="text-red-500 text-xs font-bold">
-                      Logout
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              <Text className="text-gray-400 text-xs mb-4">
-                Access YouTube with background play, ad‑blocking, and media
-                extraction powered by YTPRO. Sign in to your account directly.
-              </Text>
-
-              <View style={{flexDirection: 'row', gap: 10}}>
-                {!ytProfilePic ? (
-                  <TouchableOpacity
-                    style={{
-                      backgroundColor: '#333333',
-                      padding: 12,
-                      borderRadius: 8,
-                      alignItems: 'center',
-                      flex: 1,
-                    }}
-                    onPress={() => {
-                      if (settingsStorage.isHapticFeedbackEnabled()) {
-                        ReactNativeHapticFeedback.trigger('impactLight');
-                      }
-                      setIsYTLoginVisible(true);
-                    }}>
-                    <Text className="text-white font-bold">
-                      Login to YouTube
-                    </Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    style={{
-                      backgroundColor: '#FF0000',
-                      padding: 12,
-                      borderRadius: 8,
-                      alignItems: 'center',
-                      flex: 1,
-                    }}
-                    onPress={() => {
-                      if (settingsStorage.isHapticFeedbackEnabled()) {
-                        ReactNativeHapticFeedback.trigger('impactLight');
-                      }
-                      navigation.navigate('YTHome');
-                    }}>
-                    <Text className="text-white font-bold">Open YouTube</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-          </View>
-        </Section>
-
-        {/* YouTube Login Modal */}
-        <Modal
-          visible={isYTLoginVisible}
-          animationType="slide"
-          transparent={false}
-          presentationStyle="fullScreen"
-          onShow={() => setIsWebViewReady(true)}
-          onRequestClose={closeYouTubeLogin}>
-          <View style={{flex: 1, backgroundColor: 'black'}}>
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                padding: 15,
-                backgroundColor: '#1A1A1A',
-                borderBottomWidth: 1,
-                borderBottomColor: '#333',
-              }}>
-              <TouchableOpacity
-                onPress={closeYouTubeLogin}
-                style={{paddingRight: 15}}>
-                <AntDesign name="close" size={24} color="white" />
-              </TouchableOpacity>
-              <Text style={{color: 'white', fontSize: 18, fontWeight: 'bold'}}>
-                Login to YouTube
-              </Text>
-            </View>
-
-            {isWebViewReady ? (
-              <WebView
-                style={{flex: 1, backgroundColor: 'black', opacity: 0.99}}
-                source={{
-                  uri: 'https://accounts.google.com/ServiceLogin?service=youtube&continue=https://m.youtube.com/',
-                }}
-                userAgent="Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-                thirdPartyCookiesEnabled={true}
-                sharedCookiesEnabled={true}
-                domStorageEnabled={true}
-                javaScriptEnabled={true}
-                setSupportMultipleWindows={false}
-                startInLoadingState={true}
-                onMessage={event => {
-                  try {
-                    const data = JSON.parse(event.nativeEvent.data);
-                    if (data.type === 'YT_LOGIN_SUCCESS') {
-                      setYtProfilePic(data.pp);
-                      MMKV.setString('ytProfilePic', data.pp);
-                      closeYouTubeLogin();
-                      showToast('Successfully logged in!');
-                    }
-                  } catch (e) {
-                    console.log('Error parsing WebView message', e);
-                  }
-                }}
-                injectedJavaScript={`
-                  setInterval(function() {
-                    if (window !== window.top) return;
-                    if (window.location.hostname === 'm.youtube.com' || window.location.hostname === 'www.youtube.com') {
-                      var signInBtn = document.querySelector('a[href*="ServiceLogin"]') || document.querySelector('.ytm-btn-sync');
-                      if (signInBtn) return;
-                      var img = document.querySelector('ytm-profile-icon img') || 
-                                document.querySelector('#avatar-btn img');
-                      if (img && img.src && (img.src.includes('ggpht.com') || img.src.includes('googleusercontent.com'))) {
-                        if (!img.src.includes('default_avatar')) {
-                          window.ReactNativeWebView.postMessage(JSON.stringify({ 
-                            type: 'YT_LOGIN_SUCCESS', 
-                            pp: img.src 
-                          }));
-                        }
-                      }
-                    }
-                  }, 2000);
-                  true;
-                `}
-              />
-            ) : (
-              <View
-                style={{
-                  flex: 1,
-                  backgroundColor: 'black',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                }}>
-                <ActivityIndicator size="large" color="#FF0000" />
-              </View>
-            )}
-          </View>
-        </Modal>
-
         {/* Options */}
         <Section>
           <View className="mb-6">
@@ -1199,6 +1065,92 @@ const Settings = ({navigation}: Props) => {
             </View>
           </View>
         </Section>
+
+        {/* Security & App Lock */}
+        <Section>
+          <View className="mb-6 flex-col gap-3">
+            <Text className="text-gray-400 text-sm mb-1">Security</Text>
+            <View className="bg-[#1A1A1A] rounded-xl overflow-hidden">
+              <View className="flex-row items-center justify-between p-4 border-b border-[#262626]">
+                <View className="flex-row items-center flex-1">
+                  <MaterialIcons name="lock" size={22} color={primary} />
+                  <View className="flex-col ml-3">
+                    <Text className="text-white text-base">App Lock (PIN)</Text>
+                  </View>
+                </View>
+                <Switch
+                  trackColor={{false: '#767577', true: primary}}
+                  thumbColor={'#f4f3f4'}
+                  onValueChange={handleToggleAppLock}
+                  value={appLockEnabled}
+                />
+              </View>
+
+              {appLockEnabled && (
+                <View className="flex-row items-center justify-between p-4">
+                  <View className="flex-row items-center flex-1">
+                    <MaterialIcons
+                      name="fingerprint"
+                      size={22}
+                      color={primary}
+                    />
+                    <View className="flex-col ml-3">
+                      <Text className="text-white text-base">
+                        Biometric Unlock
+                      </Text>
+                      <Text className="text-gray-400 text-xs mt-0.5">
+                        Use fingerprint or FaceID
+                      </Text>
+                    </View>
+                  </View>
+                  <Switch
+                    trackColor={{false: '#767577', true: primary}}
+                    thumbColor={'#f4f3f4'}
+                    onValueChange={handleToggleBiometric}
+                    value={biometricEnabled}
+                  />
+                </View>
+              )}
+            </View>
+          </View>
+        </Section>
+
+        {/* PIN Setup Modal */}
+        <Modal visible={showPinModal} transparent animationType="slide">
+          <View className="flex-1 bg-black/80 justify-center items-center px-4">
+            <View className="bg-[#1A1A1A] p-6 rounded-2xl w-full max-w-sm">
+              <Text className="text-white text-xl font-bold mb-4 text-center">
+                Set 4-Digit PIN
+              </Text>
+              <TextInput
+                className="bg-[#262626] text-white text-2xl tracking-[1em] text-center p-4 rounded-xl mb-4"
+                keyboardType="number-pad"
+                maxLength={4}
+                secureTextEntry
+                value={tempPin}
+                onChangeText={setTempPin}
+                autoFocus
+              />
+              <View className="flex-row justify-between">
+                <TouchableOpacity
+                  className="flex-1 mr-2 bg-transparent border border-gray-600 p-3 rounded-xl"
+                  onPress={() => setShowPinModal(false)}>
+                  <Text className="text-white text-center font-bold">
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  className="flex-1 ml-2 p-3 rounded-xl"
+                  style={{backgroundColor: primary}}
+                  onPress={submitPin}>
+                  <Text className="text-white text-center font-bold">
+                    Save PIN
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         {/* Vega‑Next AI */}
         <Section>

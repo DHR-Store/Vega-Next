@@ -18,7 +18,7 @@ export class ExtensionManager {
   private static instance: ExtensionManager;
   
   private baseUrl =
-    'https://raw.githubusercontent.com/DHR-Store/vega-providers/refs/heads/main';
+    'https://raw.githubusercontent.com/DHR-Store/vega-provider/refs/heads/main';
 
   // --- ADDED: Your Fine-grained GitHub PAT ---
   private githubToken = 'YOUR_GITHUB_PAT';
@@ -419,6 +419,12 @@ export class ExtensionManager {
   setTestMode(enabled: boolean): void {
     this.testMode = enabled;
     console.log(`Test mode ${enabled ? 'enabled' : 'disabled'}`);
+  }
+
+  // --- FIXED: Dynamically handles changing target test addresses ---
+  setBaseUrlTestMode(url: string): void {
+    this.baseUrlTestMode = url;
+    console.log(`Test Base URL set to: ${url}`);
   }
 
   private isTestModuleCacheExpired(providerValue: string): boolean {

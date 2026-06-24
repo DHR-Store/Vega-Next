@@ -7,15 +7,16 @@ import {
   ToastAndroid,
   StatusBar,
   TextInput,
-  DeviceEventEmitter, // Added Import
+  DeviceEventEmitter,
 } from 'react-native';
-import React, {useState} from 'react';
+import React, {useState, useEffect} from 'react'; // FIXED: Added useEffect
 import {MMKV} from '../../lib/Mmkv';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useThemeStore from '../../lib/zustand/themeStore';
 import {Dropdown} from 'react-native-element-dropdown';
 import {themes} from '../../lib/constants';
+import {extensionManager} from '../../lib/services/ExtensionManager'; // FIXED: Imported Extension Manager
 
 // --- Constants for New Features ---
 const dnsProviders = [
@@ -98,6 +99,20 @@ const Preferences = () => {
   // New States for DNS and User Agent
   const [dnsUrl, setDnsUrl] = useState(MMKV.getString('dnsUrl') || '');
   const [userAgent, setUserAgent] = useState(MMKV.getString('userAgent') || '');
+
+  // FIXED: Added missing Developer States
+  const [developerMode, setDeveloperMode] = useState<boolean>(
+    MMKV.getBool('developerMode') || false,
+  );
+  const [testBaseUrl, setTestBaseUrl] = useState<string>(
+    MMKV.getString('testBaseUrl') || 'http://10.0.2.2:3000',
+  );
+
+  // FIXED: Sync data values to Extension Manager initialization loop
+  useEffect(() => {
+    extensionManager.setTestMode(developerMode);
+    extensionManager.setBaseUrlTestMode(testBaseUrl);
+  }, []);
 
   return (
     <ScrollView
@@ -295,7 +310,7 @@ const Preferences = () => {
           </View>
         </View>
 
-        {/* --- Custom Cloud Features (New Section) --- */}
+        {/* --- Custom Cloud Features --- */}
         <View className="mb-6">
           <Text className="text-gray-400 text-sm mb-3">
             Custom Cloud Features
@@ -342,8 +357,6 @@ const Preferences = () => {
                     MMKV.setString('dnsUrl', item.value);
                     setDnsUrl(item.value);
                     ToastAndroid.show(`DNS: ${item.name}`, ToastAndroid.SHORT);
-                  } else {
-                    // Logic handled by rendering input below
                   }
                 }}
               />
@@ -513,6 +526,64 @@ const Preferences = () => {
                 }}
               />
             </View>
+          </View>
+        </View>
+
+        {/* --- FIXED: Added Missing Developer Options Section --- */}
+        <View className="mb-6">
+          <Text className="text-gray-400 text-sm mb-3">Developer</Text>
+          <View className="bg-[#1A1A1A] rounded-xl overflow-hidden p-4">
+            <View className="flex-row items-center justify-between pb-4 border-b border-[#262626]">
+              <Text className="text-white text-base">
+                Enable Provider Test Mode
+              </Text>
+              <Switch
+                thumbColor={developerMode ? primary : 'gray'}
+                value={developerMode}
+                onValueChange={val => {
+                  MMKV.setBool('developerMode', val);
+                  setDeveloperMode(val);
+                  extensionManager.setTestMode(val);
+                  ToastAndroid.show(
+                    `Test Mode ${val ? 'Enabled' : 'Disabled'}`,
+                    ToastAndroid.SHORT,
+                  );
+                }}
+              />
+            </View>
+
+            {developerMode && (
+              <View className="mt-4">
+                <Text className="text-white text-base mb-2">
+                  Localhost Base URL
+                </Text>
+                <TextInput
+                  style={{
+                    color: 'white',
+                    backgroundColor: '#262626',
+                    borderRadius: 8,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    fontSize: 14,
+                  }}
+                  placeholder="http://10.0.2.2:3000"
+                  placeholderTextColor="gray"
+                  defaultValue={testBaseUrl}
+                  onSubmitEditing={e => {
+                    const newUrl = e.nativeEvent.text;
+                    MMKV.setString('testBaseUrl', newUrl);
+                    setTestBaseUrl(newUrl);
+                    extensionManager.setBaseUrlTestMode(newUrl);
+                    ToastAndroid.show('Test URL Saved', ToastAndroid.SHORT);
+                  }}
+                />
+                <Text className="text-gray-500 text-xs mt-2 ml-1">
+                  URL pointing to your local provider build (use your laptop's
+                  USB tethering IP address, for example:
+                  http://192.168.42.129:3000).
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 

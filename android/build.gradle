@@ -6,7 +6,8 @@ buildscript {
         minSdkVersion = Integer.parseInt(findProperty('android.minSdkVersion') ?: '24')
         compileSdkVersion = Integer.parseInt(findProperty('android.compileSdkVersion') ?: '35')
         targetSdkVersion = Integer.parseInt(findProperty('android.targetSdkVersion') ?: '34')
-        kotlinVersion = findProperty('android.kotlinVersion') ?: '2.1.20'
+        kotlinVersion = findProperty('kotlinVersion') ?: '2.1.20'
+        kspVersion = findProperty('kspVersion') ?: '2.1.20-2.0.1'
         ndkVersion = "28.0.13004108"
     }
 
@@ -18,7 +19,7 @@ buildscript {
 
     dependencies {
         classpath("com.android.tools.build:gradle:8.7.0")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${kotlinVersion}")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("com.google.gms:google-services:4.3.15")
     }
@@ -48,8 +49,14 @@ allprojects {
 subprojects {
     project.configurations.all {
         resolutionStrategy.eachDependency { details ->
+            // Enforce React Native version harmony
             if (details.requested.group == 'com.facebook.react' && details.requested.name.contains('react-native')) {
                 details.useVersion "0.81.5"   // Matches your RN version
+            }
+            
+            // ✅ Fix: Force uniform OkHttp version to eliminate "NoClassDefFoundError: Lokhttp3/internal/Util" crash
+            if (details.requested.group == 'com.squareup.okhttp3') {
+                details.useVersion "4.12.0"
             }
         }
     }

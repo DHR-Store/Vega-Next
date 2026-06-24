@@ -4,7 +4,7 @@ module.exports = function (api) {
     presets: [
       [
         'babel-preset-expo',
-        { unstable_transformImportMeta: true } // ✅ Fixes "import.meta is not supported" in Hermes
+        { unstable_transformImportMeta: true }
       ]
     ],
     plugins: [
@@ -18,7 +18,7 @@ module.exports = function (api) {
         },
       ],
       'nativewind/babel',
-      'react-native-reanimated/plugin',
+      'react-native-reanimated/plugin', // ✅ Restored to the official plugin
     ],
   };
 };

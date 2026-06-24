@@ -35,8 +35,8 @@ if (
 
 // --- API KEYS ---
 // WARNING: NEVER HARDCODE SECURE KEYS IN PRODUCTION. This is for example/internal use only.
-const GROQ_API_KEY = 'YOUR_GROQ_API_KEY';
-const TMDB_API_KEY = 'YOUR_TMDB_API_KEY';
+const GROQ_API_KEY = 'YOUR_GROQ_API';
+const TMDB_API_KEY = 'YOUR_TMDB_API';
 
 const {width: SCREEN_WIDTH, height: SCREEN_HEIGHT} = Dimensions.get('window');
 

@@ -7,15 +7,16 @@
 import 'react-native-url-polyfill/auto';
 import {createClient, SupabaseClient, User as SupabaseUser} from '@supabase/supabase-js';
 import {MMKV} from 'react-native-mmkv';
+import {DeviceEventEmitter} from 'react-native'; // ✅ added
 import {storageService} from '../storage/StorageService';
 import {cloudSyncService} from '../services/CloudSyncService';
 
 import useWatchHistoryStore from '../zustand/watchHistrory';
 import useWatchListStore from '../zustand/watchListStore';
-import { watchHistoryStorage } from '../storage/WatchHistoryStorage';
-import { watchListStorage } from '../storage/WatchListStorage';
+import {watchHistoryStorage} from '../storage/WatchHistoryStorage';
+import {watchListStorage} from '../storage/WatchListStorage';
 
-const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+const SUPABASE_URL = 'https://YOUR_SUPABASE_URL.supabase.co';
 const SUPABASE_ANON_KEY =
   'YOUR_SUPABASE_ANON_KEY';
 
@@ -49,8 +50,8 @@ class UserSession {
   private constructor() {
     this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
-        persistSession: false,
-        autoRefreshToken: false,
+        persistSession: true,      // ✅ changed to true
+        autoRefreshToken: true,    // ✅ changed to true
         detectSessionInUrl: false,
       },
     });
@@ -62,6 +63,11 @@ class UserSession {
       UserSession.instance = new UserSession();
     }
     return UserSession.instance;
+  }
+
+  // ✅ Expose the authenticated Supabase client
+  public getSupabaseClient(): SupabaseClient {
+    return this.supabase;
   }
 
   private _mapSupabaseUser(su: SupabaseUser): User {
@@ -94,28 +100,25 @@ class UserSession {
   private async _finaliseLogin(user: User): Promise<User> {
     this.currentUser = user;
     this.sessionStorage.set('currentUser', JSON.stringify(user));
+    DeviceEventEmitter.emit('userLoggedIn', user);
 
     // 1. CAPTURE GUEST/OFFLINE DATA BEFORE SWITCHING PARTITIONS
-    // We do this while still in the "Guest" storage partition
     const guestHistory = watchHistoryStorage.getWatchHistory() || [];
     const guestWatchList = watchListStorage.getWatchList() || [];
 
     // 2. SWITCH STORAGE TO LOGGED-IN USER PARTITION
-    // This hides the guest data and activates the user's isolated storage
     storageService.setCurrentUser(user.id);
 
-    // 3. PULL EXISTING USER DATA FROM CLOUD 
-    // This populates the local User partition so it works offline later
+    // 3. PULL EXISTING USER DATA FROM CLOUD
     await cloudSyncService.pullUserData(user.id).catch(e => console.log('Offline/Sync error', e));
 
     // 4. MERGE GUEST DATA INTO USER PARTITION
     if (guestHistory.length > 0) {
       const userHistory = watchHistoryStorage.getWatchHistory() || [];
       const userHistoryIds = new Set(userHistory.map(i => i.id));
-      
       guestHistory.forEach(item => {
         if (!userHistoryIds.has(item.id)) {
-          watchHistoryStorage.addToWatchHistory(item); // Adds missing offline history
+          watchHistoryStorage.addToWatchHistory(item);
         }
       });
     }
@@ -123,10 +126,9 @@ class UserSession {
     if (guestWatchList.length > 0) {
       const userList = watchListStorage.getWatchList() || [];
       const userListLinks = new Set(userList.map(i => i.link));
-      
       guestWatchList.forEach(item => {
         if (!userListLinks.has(item.link)) {
-          watchListStorage.addToWatchList(item); // Adds missing offline bookmarks
+          watchListStorage.addToWatchList(item);
         }
       });
     }
@@ -139,47 +141,52 @@ class UserSession {
     cloudSyncService
       .saveUserProfile(user.id, {email: user.email, name: user.name, photo: user.photo})
       .catch(() => {});
-      
+
     return user;
   }
 
-  // ── Profile photo ──────────────────────────────────────────────────────────
+  // ── Profile Updates ────────────────────────────────────────────────────────
 
-  /**
-   * Save a custom profile photo for the current user.
-   * Pass a base64 data URI: "data:image/jpeg;base64,/9j/4AAQ..."
-   * Stored in the user's own MMKV partition — survives app restarts.
-   */
+  async updateName(newName: string): Promise<void> {
+    if (!this.currentUser) return;
+    
+    // Update local state
+    this.currentUser.name = newName;
+    this.sessionStorage.set('currentUser', JSON.stringify(this.currentUser));
+    
+    try {
+      // Update Supabase auth metadata
+      await this.supabase.auth.updateUser({
+        data: { full_name: newName, name: newName }
+      });
+      
+      // Update cloud sync profile
+      await cloudSyncService.saveUserProfile(this.currentUser.id, {
+        email: this.currentUser.email,
+        name: newName,
+        photo: this.currentUser.photo
+      });
+    } catch (error) {
+      console.warn('[UserSession] Failed to sync name to cloud:', error);
+    }
+  }
+
   updateProfilePhoto(base64DataUri: string): void {
     if (!this.currentUser) return;
-    // storageService.main always points at the active user's partition
     storageService.main.setString(PROFILE_PHOTO_KEY, base64DataUri);
     console.log('[UserSession] Profile photo updated ✅');
   }
 
-  /**
-   * Get the custom profile photo for the current user.
-   * Returns the base64 data URI string, or null if not set.
-   */
   getProfilePhoto(): string | null {
     if (!this.currentUser) return null;
     return storageService.main.getString(PROFILE_PHOTO_KEY) ?? null;
   }
 
-  /**
-   * Remove the custom profile photo.
-   */
   clearProfilePhoto(): void {
     if (!this.currentUser) return;
     storageService.main.delete(PROFILE_PHOTO_KEY);
   }
 
-  /**
-   * Returns the best available photo URI in priority order:
-   *  1. Custom photo set by user (local, base64)
-   *  2. OAuth provider photo (remote URL, e.g. from Google)
-   *  3. null — caller should show initials avatar
-   */
   getBestPhotoUri(): string | null {
     return this.getProfilePhoto() ?? this.currentUser?.photo ?? null;
   }
@@ -250,6 +257,8 @@ class UserSession {
     this.sessionStorage.delete('currentUser');
     storageService.setCurrentUser(null);
     rehydrateAllStores();
+    // ✅ Emit logout event
+    DeviceEventEmitter.emit('userLoggedOut');
   }
 
   getCurrentUser(): User | null {
@@ -262,3 +271,5 @@ class UserSession {
 }
 
 export const userSession = UserSession.getInstance();
+// ✅ Export the authenticated Supabase client for use in other services
+export const supabaseClient = userSession.getSupabaseClient();

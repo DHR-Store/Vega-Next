@@ -1,4 +1,3 @@
-
 package com.vega.next
 import com.zoontek.rnbootsplash.RNBootSplash
 

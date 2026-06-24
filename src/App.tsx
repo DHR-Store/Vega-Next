@@ -74,6 +74,7 @@ import useAppModeStore from './lib/zustand/appModeStore';
 import VegaTVSettingsScreen from './screens/tv/VegaTVSettingsScreen';
 import * as Application from 'expo-application';
 import Suggestion from './screens/Suggestion';
+import FloatingCommunityButton from './components/FloatingCommunityButton';
 import {MMKV} from './lib/Mmkv';
 import CastMovie from './screens/CastMovie';
 import Onboarding from './screens/Onboarding';
@@ -82,10 +83,11 @@ import AI from './components/AI';
 import ChatHistory from './screens/ChatHistory';
 import AddExtension from './screens/AddExtension';
 import ProviderCheck from './screens/settings/ProviderCheck';
-import YTHome from './screens/yt/YTHome';
 import Login from './screens/Login';
 import {userSession, User} from './lib/services/login';
 import {downloadManager} from './lib/services/DownloadManager';
+import CommunityScreen from './screens/Community';
+import AppLock from './components/AppLock'; // Adjust path if necessary
 
 enableScreens(true);
 enableFreeze(true);
@@ -109,20 +111,10 @@ export type HomeStackParamList = {
   Webview: {link: string};
 };
 
-export type VegaMusicStackParamList = {
-  VegaMusicHome: undefined;
-  VegaSettings: undefined;
-  VegaMusicSearch: undefined;
-};
-
 export type VegaTVStackParamList = {
   LiveTVScreen: undefined;
   TVPlayerScreen: {streamUrl: string};
   VegaTVSettingsScreen: undefined;
-};
-
-export type MusicRootStackParamList = {
-  VegaMusicStack: NavigatorScreenParams<VegaMusicStackParamList>;
 };
 
 export type TVRootStackParamList = {
@@ -133,9 +125,7 @@ export type RootStackParamList = {
   Onboarding: undefined;
   Login: undefined;
   MainStack: undefined;
-  YTHome: undefined;
   TabStack: NavigatorScreenParams<TabStackParamList>;
-  MusicRootStack: NavigatorScreenParams<MusicRootStackParamList>;
   TVRootStack: NavigatorScreenParams<TVRootStackParamList>;
   Player: {
     linkIndex: number;
@@ -218,12 +208,11 @@ const WatchListStack = createNativeStackNavigator<WatchListStackParamList>();
 const SettingsStack = createNativeStackNavigator<SettingsStackParamList>();
 const WatchHistoryStack =
   createNativeStackNavigator<WatchHistoryStackParamList>();
-const MusicRootStack = createNativeStackNavigator<MusicRootStackParamList>();
-const VegaMusicStack = createNativeStackNavigator<VegaMusicStackParamList>();
+const CommunityStack = createNativeStackNavigator();
 const TVRootStack = createNativeStackNavigator<TVRootStackParamList>();
 const VegaTVStack = createNativeStackNavigator<VegaTVStackParamList>();
 
-/* ----------------- Custom TabBarButton (plain function – NO memo) ----------------- */
+/* ----------------- Custom TabBarButton ----------------- */
 function CustomTabBarButton(props: any) {
   const handlePress = useCallback(
     (e: any) => {
@@ -253,7 +242,7 @@ function CustomTabBarButton(props: any) {
   );
 }
 
-/* ----------------- Stack screens (no freezeOnBlur) ----------------- */
+/* ----------------- Stack screens ----------------- */
 function HomeStackScreen() {
   return (
     <HomeStack.Navigator
@@ -322,6 +311,19 @@ function WatchHistoryStackScreen() {
   );
 }
 
+function CommunityStackScreen() {
+  return (
+    <CommunityStack.Navigator
+      screenOptions={{
+        headerShown: false,
+        animation: 'ios_from_right',
+        animationDuration: 200,
+      }}>
+      <CommunityStack.Screen name="CommunityMain" component={CommunityScreen} />
+    </CommunityStack.Navigator>
+  );
+}
+
 function SettingsStackScreen() {
   return (
     <SettingsStack.Navigator
@@ -349,21 +351,6 @@ function SettingsStackScreen() {
   );
 }
 
-function VegaMusicStackNavigator() {
-  return (
-    <VegaMusicStack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'ios_from_right',
-        animationDuration: 200,
-        contentStyle: {backgroundColor: 'transparent'},
-      }}>
-      <VegaMusicStack.Screen name="VegaMusicHome" component={View} />
-      <VegaMusicStack.Screen name="VegaSettings" component={View} />
-    </VegaMusicStack.Navigator>
-  );
-}
-
 function VegaTVStackNavigator() {
   return (
     <VegaTVStack.Navigator
@@ -383,7 +370,7 @@ function VegaTVStackNavigator() {
   );
 }
 
-/* ----------------- Tab stack (detachInactiveScreens = false) ----------------- */
+/* ----------------- Tab stack ----------------- */
 function TabStackScreen() {
   const {primary} = useThemeStore(state => state);
   const {width} = useWindowDimensions();
@@ -547,24 +534,6 @@ function TabStackScreen() {
   );
 }
 
-/* ----------------- Music / TV roots ----------------- */
-function MusicRootStackScreen() {
-  return (
-    <MusicRootStack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'ios_from_right',
-        animationDuration: 200,
-        contentStyle: {backgroundColor: 'transparent'},
-      }}>
-      <MusicRootStack.Screen
-        name="VegaMusicStack"
-        component={VegaMusicStackNavigator}
-      />
-    </MusicRootStack.Navigator>
-  );
-}
-
 function TVRootStackScreen() {
   return (
     <TVRootStack.Navigator
@@ -623,9 +592,65 @@ const App = () => {
   const {primary} = useThemeStore(state => state);
   const {appMode} = useAppModeStore(state => state);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [isLocked, setIsLocked] = useState(
+    MMKV.getBool('appLockEnabled') || false,
+  );
   const navigationRef = useNavigationContainerRef();
   const [currentRouteName, setCurrentRouteName] = useState<string>('');
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+  const [isCommunityOpen, setIsCommunityOpen] = useState(false);
+
+  // Community floating button state
+
+  const [showCommunityButton, setShowCommunityButton] = useState(() => {
+    const enabled = MMKV.getBool('community_enabled');
+    const loggedIn = userSession.isLoggedIn();
+    console.log(
+      '[App] Initial community state - enabled:',
+      enabled,
+      'loggedIn:',
+      loggedIn,
+    );
+    return enabled && loggedIn;
+  });
+
+  const isCommunityScreen = currentRouteName === 'Community';
+  const shouldShowButton =
+    showCommunityButton && userSession.isLoggedIn() && !isCommunityScreen;
+
+  // ✅ ADD COMMUNITY EVENT LISTENERS
+  useEffect(() => {
+    console.log('[App] Community listeners registered');
+
+    const communitySub = DeviceEventEmitter.addListener(
+      'communityToggled',
+      (enabled: boolean) => {
+        console.log(
+          '[App] communityToggled event:',
+          enabled,
+          'isLoggedIn:',
+          userSession.isLoggedIn(),
+        );
+        setShowCommunityButton(enabled && userSession.isLoggedIn());
+      },
+    );
+
+    const loginSub = DeviceEventEmitter.addListener('userLoggedIn', () => {
+      console.log('[App] userLoggedIn event');
+      setShowCommunityButton(MMKV.getBool('community_enabled') && true);
+    });
+
+    const logoutSub = DeviceEventEmitter.addListener('userLoggedOut', () => {
+      console.log('[App] userLoggedOut event');
+      setShowCommunityButton(false);
+    });
+
+    return () => {
+      communitySub.remove();
+      loginSub.remove();
+      logoutSub.remove();
+    };
+  }, []);
 
   SystemUI.setBackgroundColorAsync('black');
 
@@ -647,18 +672,44 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (nextAppState === 'active' && MMKV.getBool('appLockEnabled')) {
+        setIsLocked(true);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
+  // 🔴 FIX: Properly request POST_NOTIFICATIONS only on Android 13+
+  useEffect(() => {
     const checkNotificationPermission = async () => {
-      const status = await check(PERMISSIONS.ANDROID.POST_NOTIFICATIONS);
-      if (status === RESULTS.DENIED || status === RESULTS.NOT_DETERMINED) {
-        setShowNotificationModal(true);
+      if (Platform.OS === 'android' && Platform.Version >= 33) {
+        try {
+          const status = await check(PERMISSIONS.ANDROID.POST_NOTIFICATIONS);
+          if (status === RESULTS.DENIED || status === RESULTS.NOT_DETERMINED) {
+            setShowNotificationModal(true);
+          }
+        } catch (err) {
+          console.error('Permission check failed:', err);
+        }
       }
     };
     checkNotificationPermission();
   }, []);
 
   const handleAllowNotifications = async () => {
-    const result = await request(PERMISSIONS.ANDROID.POST_NOTIFICATIONS);
-    if (result === RESULTS.GRANTED) setShowNotificationModal(false);
+    if (Platform.OS === 'android' && Platform.Version >= 33) {
+      const result = await request(PERMISSIONS.ANDROID.POST_NOTIFICATIONS);
+      if (result === RESULTS.GRANTED) {
+        setShowNotificationModal(false);
+        // Force OneSignal to recognize the granted permission
+        OneSignal.Notifications.requestPermission(true);
+      } else {
+        setShowNotificationModal(false);
+      }
+    } else {
+      setShowNotificationModal(false);
+    }
   };
 
   useEffect(() => {
@@ -773,10 +824,8 @@ const App = () => {
     sendUserPing();
   }, []);
 
-  let MainComponent = TabStackScreen;
-  if (appMode === 'video') MainComponent = TabStackScreen;
-  else if (appMode === 'music') MainComponent = MusicRootStackScreen;
-  else MainComponent = TVRootStackScreen;
+  // Simplified mode selector since Music is removed
+  const MainComponent = appMode === 'tv' ? TVRootStackScreen : TabStackScreen;
 
   const hasSeenOnboarding = MMKV.getBool('hasSeenOnboarding') === true;
 
@@ -835,31 +884,41 @@ const App = () => {
                     notification: primary,
                   },
                 }}>
-                <Stack.Navigator
-                  initialRouteName={initialRoute}
-                  screenOptions={{
-                    headerShown: false,
-                    animation: 'ios_from_right',
-                    animationDuration: 200,
-                    contentStyle: {backgroundColor: 'transparent'},
-                  }}>
-                  <Stack.Screen name="Onboarding" component={Onboarding} />
-                  <Stack.Screen name="Login" component={Login} />
-                  <Stack.Screen name="MainStack" component={MainComponent} />
-                  <Stack.Screen
-                    name="Player"
-                    component={Player}
-                    options={{orientation: 'landscape'}}
+                {/* Wrap navigator and floating button in a fragment */}
+                <>
+                  <Stack.Navigator
+                    initialRouteName={initialRoute}
+                    screenOptions={{
+                      headerShown: false,
+                      animation: 'ios_from_right',
+                      animationDuration: 200,
+                      contentStyle: {backgroundColor: 'transparent'},
+                    }}>
+                    <Stack.Screen name="Onboarding" component={Onboarding} />
+                    <Stack.Screen name="Login" component={Login} />
+                    <Stack.Screen name="MainStack" component={MainComponent} />
+                    <Stack.Screen
+                      name="Player"
+                      component={Player}
+                      options={{orientation: 'landscape'}}
+                    />
+                    <Stack.Screen name="WatchTrailer" component={WebView} />
+                    <Stack.Screen name="CastMovie" component={CastMovie} />
+                    <Stack.Screen name="ChatHistory" component={ChatHistory} />
+                  </Stack.Navigator>
+
+                  {/* Floating button now inside NavigationContainer */}
+                  <FloatingCommunityButton
+                    visible={shouldShowButton && !isCommunityOpen}
+                    onOpen={() => setIsCommunityOpen(true)}
                   />
-                  <Stack.Screen name="WatchTrailer" component={WebView} />
-                  <Stack.Screen name="CastMovie" component={CastMovie} />
-                  <Stack.Screen name="ChatHistory" component={ChatHistory} />
-                  <Stack.Screen
-                    name="YTHome"
-                    component={YTHome}
-                    options={{headerShown: false}}
-                  />
-                </Stack.Navigator>
+                  {/* 🟢 3. RENDER the community chat as a floating widget component */}
+                  {isCommunityOpen && (
+                    <CommunityScreen
+                      onClose={() => setIsCommunityOpen(false)}
+                    />
+                  )}
+                </>
               </NavigationContainer>
 
               <AI
@@ -875,6 +934,7 @@ const App = () => {
                 onClose={() => setShowNotificationModal(false)}
                 onAllow={handleAllowNotifications}
               />
+              {isLocked && <AppLock onUnlock={() => setIsLocked(false)} />}
             </SafeAreaView>
           </QueryClientProvider>
         </SafeAreaProvider>

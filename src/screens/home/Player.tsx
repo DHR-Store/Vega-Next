@@ -5,6 +5,7 @@ import {
   ToastAndroid,
   TouchableOpacity,
   View,
+  Image,
   Platform,
   TouchableNativeFeedback,
   StatusBar,
@@ -15,7 +16,9 @@ import {
   Alert,
   Share,
   FlatList,
+  StyleSheet,
 } from 'react-native';
+import {LinearGradient} from 'expo-linear-gradient';
 // NOTE: Clipboard was removed from react-native core. Use @react-native-clipboard/clipboard
 // If not installed, we fall back to a Share-based copy approach below.
 let ClipboardModule: {setString: (s: string) => void} | null = null;
@@ -192,6 +195,17 @@ const base64Decode = (input: string): string | null => {
   }
 };
 
+// --- HDR TYPES ---
+type HDRMode = 'auto' | 'sdr' | 'hdr10' | 'hlg' | 'dolby_vision';
+
+interface HDRCapabilities {
+  isHDR10Supported: boolean;
+  isDolbyVisionSupported: boolean;
+  isHLGSupported: boolean;
+  maxLuminance: number | null;
+  isAnyHDRSupported: boolean;
+}
+
 // --- STORAGE KEYS ---
 const KEY_FF_RATE = 'fastForwardRate';
 const KEY_SKIP_INTRO = 'autoSkipIntro';
@@ -199,6 +213,7 @@ const KEY_SKIP_DURATION = 'skipIntroDuration';
 const KEY_WATCH_TOGETHER = 'watchTogetherMode';
 const KEY_USER_NICKNAME = 'userNickname';
 const KEY_USER_PASSWORD = 'userPassword';
+const KEY_HDR_MODE = 'hdrPlaybackMode';
 
 // --- INITIAL SETTINGS CONSTANTS ---
 const DEFAULT_FF_RATE = 2.0;
@@ -235,6 +250,12 @@ const getUserNickname = (): string => {
 
 const getUserPassword = (): string => {
   return cacheStorage.getString(KEY_USER_PASSWORD) || '';
+};
+
+const getHDRMode = (): HDRMode => {
+  const mode = cacheStorage.getString(KEY_HDR_MODE);
+  const valid: HDRMode[] = ['auto', 'sdr', 'hdr10', 'hlg', 'dolby_vision'];
+  return valid.includes(mode as HDRMode) ? (mode as HDRMode) : 'auto';
 };
 
 // --- REALTIME SYNC HOOK ---
@@ -526,6 +547,66 @@ const useRealtimeSync = (
   };
 };
 
+// --- HDR SUPPORT HOOK ---
+const useHDRSupport = (): HDRCapabilities => {
+  return useMemo(() => {
+    if (Platform.OS === 'ios') {
+      // iOS AVFoundation handles HDR automatically; treat all formats as supported
+      return {
+        isHDR10Supported: true,
+        isDolbyVisionSupported: true,
+        isHLGSupported: true,
+        maxLuminance: null,
+        isAnyHDRSupported: true,
+      };
+    }
+    try {
+      const constants = Platform.constants as any;
+      const isHDR10 = Boolean(constants?.isHDR10Supported);
+      const isDolbyVision = Boolean(constants?.isDolbyVisionSupported);
+      const isHLG = Boolean(constants?.isHLGSupported);
+      const maxLuminance: number | null =
+        typeof constants?.maxLuminance === 'number'
+          ? constants.maxLuminance
+          : null;
+      return {
+        isHDR10Supported: isHDR10,
+        isDolbyVisionSupported: isDolbyVision,
+        isHLGSupported: isHLG,
+        maxLuminance,
+        isAnyHDRSupported: isHDR10 || isDolbyVision || isHLG,
+      };
+    } catch {
+      return {
+        isHDR10Supported: false,
+        isDolbyVisionSupported: false,
+        isHLGSupported: false,
+        maxLuminance: null,
+        isAnyHDRSupported: false,
+      };
+    }
+  }, []);
+};
+
+/**
+ * Detects whether any video track in the list is likely an HDR track.
+ * HDR streams typically use HEVC/H.265, AV1, or carry Dolby Vision markers.
+ * The codec string comparison is intentionally broad to handle variant formats.
+ */
+const detectHDRTracks = (tracks: any[]): boolean => {
+  if (!tracks || tracks.length === 0) return false;
+  return tracks.some((track: any) => {
+    const codec = (track?.codecs || '').toLowerCase();
+    const isHEVC =
+      codec.includes('hvc1') ||
+      codec.includes('hev1') ||
+      codec.includes('hevc');
+    const isAV1 = codec.includes('av01') || codec.includes('av1');
+    const isDolbyVision = codec.includes('dvh') || codec.includes('dovi');
+    return isHEVC || isAV1 || isDolbyVision;
+  });
+};
+
 // --- NICKNAME & PASSWORD INPUT OVERLAY ---
 interface NicknameOverlayProps {
   primary: string;
@@ -635,7 +716,7 @@ const EpisodePanelOverlay = ({
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
+          backgroundColor: 'rgba(0,0,0,0.45)',
           zIndex: 60,
         }}
       />
@@ -646,47 +727,72 @@ const EpisodePanelOverlay = ({
           right: 0,
           top: 0,
           bottom: 0,
-          width: 300,
-          backgroundColor: '#111',
+          width: 320,
+          backgroundColor: '#0d0d0d',
           zIndex: 61,
           borderLeftWidth: 1,
-          borderLeftColor: 'rgba(255,255,255,0.1)',
+          borderLeftColor: `${primary}44`,
+          shadowColor: '#000',
+          shadowOffset: {width: -8, height: 0},
+          shadowOpacity: 0.7,
+          shadowRadius: 20,
+          elevation: 20,
         }}
         onTouchEnd={e => e.stopPropagation()}>
-        {/* Header */}
-        <View
+        {/* Header with gradient */}
+        <LinearGradient
+          colors={[`${primary}33`, 'transparent']}
+          start={{x: 0, y: 0}}
+          end={{x: 1, y: 1}}
           style={{
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
-            padding: 12,
+            padding: 14,
             borderBottomWidth: 1,
-            borderBottomColor: 'rgba(255,255,255,0.1)',
+            borderBottomColor: 'rgba(255,255,255,0.08)',
           }}>
-          <Text
+          <View>
+            <Text
+              style={{
+                color: 'white',
+                fontSize: 16,
+                fontWeight: 'bold',
+              }}>
+              Episodes
+            </Text>
+            <Text style={{color: 'rgba(255,255,255,0.5)', fontSize: 12}}>
+              {episodeList.length} available
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={onClose}
             style={{
-              color: 'white',
-              fontSize: 16,
-              fontWeight: 'bold',
+              backgroundColor: 'rgba(255,255,255,0.1)',
+              borderRadius: 20,
+              width: 32,
+              height: 32,
+              alignItems: 'center',
+              justifyContent: 'center',
             }}>
-            Episodes ({episodeList.length})
-          </Text>
-          <TouchableOpacity onPress={onClose}>
-            <MaterialIcons name="close" size={22} color="white" />
+            <MaterialIcons name="close" size={18} color="white" />
           </TouchableOpacity>
-        </View>
+        </LinearGradient>
 
         {/* Episode List */}
         <FlatList
           data={episodeList}
           keyExtractor={(item, index) => `ep-panel-${item.link}-${index}`}
-          initialScrollIndex={Math.max(
-            0,
-            episodeList.findIndex(e => e.link === activeEpisode?.link),
-          )}
+          initialScrollIndex={(() => {
+            const idx = episodeList.findIndex(
+              e => e.link === activeEpisode?.link,
+            );
+            // FlatList crashes if initialScrollIndex >= data.length or < 0
+            return idx > 0 && idx < episodeList.length ? idx : 0;
+          })()}
           getItemLayout={(_, index) => ({
-            length: 56,
-            offset: 56 * index,
+            length: 64,
+            offset: 64 * index,
             index,
           })}
           renderItem={({item, index}) => {
@@ -702,29 +808,40 @@ const EpisodePanelOverlay = ({
                   alignItems: 'center',
                   padding: 10,
                   paddingHorizontal: 14,
-                  height: 56,
-                  backgroundColor: isActive
-                    ? 'rgba(255,255,255,0.1)'
-                    : 'transparent',
+                  height: 64,
+                  backgroundColor: isActive ? `${primary}22` : 'transparent',
                   borderBottomWidth: 1,
                   borderBottomColor: 'rgba(255,255,255,0.05)',
+                  borderLeftWidth: isActive ? 3 : 0,
+                  borderLeftColor: isActive ? primary : 'transparent',
                 }}>
                 {isActive ? (
                   <MaterialIcons
                     name="play-arrow"
-                    size={20}
+                    size={22}
                     color={primary}
                     style={{marginRight: 8}}
                   />
                 ) : (
-                  <Text
+                  <View
                     style={{
-                      color: 'rgba(255,255,255,0.4)',
                       width: 28,
-                      fontSize: 12,
+                      height: 28,
+                      borderRadius: 14,
+                      backgroundColor: 'rgba(255,255,255,0.07)',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginRight: 8,
                     }}>
-                    {index + 1}
-                  </Text>
+                    <Text
+                      style={{
+                        color: 'rgba(255,255,255,0.45)',
+                        fontSize: 11,
+                        fontWeight: '600',
+                      }}>
+                      {index + 1}
+                    </Text>
+                  </View>
                 )}
                 <Text
                   numberOfLines={2}
@@ -737,6 +854,17 @@ const EpisodePanelOverlay = ({
                   }}>
                   {item.title}
                 </Text>
+                {isActive && (
+                  <View
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 3,
+                      backgroundColor: primary,
+                      marginLeft: 6,
+                    }}
+                  />
+                )}
               </TouchableOpacity>
             );
           }}
@@ -764,7 +892,12 @@ const Player = ({route}: Props): React.JSX.Element => {
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartXRef = useRef(0);
   const touchStartYRef = useRef(0);
+  const touchStartTimeRef = useRef<number>(0);
   const isMovingRef = useRef(false);
+  // Tracks showControls synchronously (avoids stale-closure issues in touch handlers)
+  const showControlsRef = useRef<boolean>(false);
+  // Remembers whether controls were visible before a long-press fast-forward started
+  const wasShowingControlsBeforeFFRef = useRef<boolean>(false);
 
   // ── FIX: Use refs for high-frequency values to prevent videoPlayerProps from
   //         recomputing on every progress tick (was the root cause of max-depth error)
@@ -788,6 +921,12 @@ const Player = ({route}: Props): React.JSX.Element => {
   const leftChatButtonOpacity = useSharedValue(0);
   const [isFullScreen, setIsFullScreen] = useState(true);
 
+  // ── Zoom / scale state
+  const [videoScale, setVideoScale] = useState(1.0);
+  const videoScaleRef = useRef(1.0);
+  const lastPinchDistanceRef = useRef<number | null>(null);
+  const isPinchingRef = useRef(false);
+
   // ── Episode panel state
   const [showEpisodePanel, setShowEpisodePanel] = useState(false);
 
@@ -802,7 +941,6 @@ const Player = ({route}: Props): React.JSX.Element => {
       setIsFullScreen(true);
     }
   }, [isFullScreen]);
-
   const loadingContainerStyle = useAnimatedStyle(() => ({
     opacity: loadingOpacity.value,
     transform: [{scale: loadingScale.value}],
@@ -918,6 +1056,11 @@ const Player = ({route}: Props): React.JSX.Element => {
     handleLockedScreenTap,
     unlockButtonTimerRef,
   } = usePlayerSettings();
+
+  // Keep the ref in sync with the React state so touch handlers never read stale closures.
+  useEffect(() => {
+    showControlsRef.current = showControls;
+  }, [showControls]);
 
   const [autoSkipIntro, setAutoSkipIntroState] = useState(getAutoSkipIntro());
   const [skipDuration, setSkipDurationState] = useState(getSkipIntroDuration());
@@ -1208,6 +1351,47 @@ const Player = ({route}: Props): React.JSX.Element => {
     cacheStorage.setString(KEY_FF_RATE, String(rate));
   }, []);
 
+  // ── HDR state & capabilities
+  const hdrCapabilities = useHDRSupport();
+  const [hdrMode, setHDRModeState] = useState<HDRMode>(getHDRMode());
+
+  const setHDRMode = useCallback((mode: HDRMode) => {
+    setHDRModeState(mode);
+    cacheStorage.setString(KEY_HDR_MODE, mode);
+    const label =
+      mode === 'auto'
+        ? 'HDR: Auto (device decides)'
+        : mode === 'sdr'
+          ? 'SDR mode – HDR disabled'
+          : `${mode.toUpperCase()} mode enabled`;
+    ToastAndroid.show(label, ToastAndroid.SHORT);
+  }, []);
+
+  // ── Force ExoPlayer / AVPlayer to re-initialise when the HDR policy changes.
+  //    Bumping keyForPlayer re-mounts the VideoPlayer component which flushes
+  //    the codec pipeline so the new bitrate policy takes effect immediately.
+  const isHDRMountRef = useRef(true);
+  useEffect(() => {
+    if (isHDRMountRef.current) {
+      isHDRMountRef.current = false;
+      return; // Skip initial mount
+    }
+    setKeyForPlayer(k => k + 1);
+  }, [hdrMode]);
+
+  /**
+   * True whenever the user has HDR mode on (anything except 'sdr').
+   * Does NOT gate on device capability – we always honour the toggle
+   * and apply the best available processing the device supports.
+   */
+  const isHDRActive = useMemo(() => hdrMode !== 'sdr', [hdrMode]);
+
+  /** True when the current stream appears to carry HDR-capable tracks */
+  const hasHDRTracks = useMemo(
+    () => detectHDRTracks(videoTracks),
+    [videoTracks],
+  );
+
   useEffect(() => {
     isFastForwardingRef.current = isFastForwarding;
   }, [isFastForwarding]);
@@ -1216,14 +1400,36 @@ const Player = ({route}: Props): React.JSX.Element => {
     return isFastForwarding ? fastForwardRate : basePlaybackRate;
   }, [isFastForwarding, fastForwardRate, basePlaybackRate]);
 
+  // ── Pinch distance helper
+  const getPinchDistance = useCallback((touches: any[]) => {
+    const dx = touches[0].pageX - touches[1].pageX;
+    const dy = touches[0].pageY - touches[1].pageY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }, []);
+
   const handleTouchStart = useCallback(
     (e: any) => {
+      // Two-finger pinch begin – cancel any long-press timer and handle separately
+      if (e.nativeEvent.touches.length === 2) {
+        isPinchingRef.current = true;
+        lastPinchDistanceRef.current = getPinchDistance(e.nativeEvent.touches);
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+        return;
+      }
+
       touchStartXRef.current = e.nativeEvent.pageX;
       touchStartYRef.current = e.nativeEvent.pageY;
+      touchStartTimeRef.current = Date.now();
       isMovingRef.current = false;
+
+      // Start the long-press timer for fast-forward.
+      // ── FIX: removed `!showControls` condition – fast-forward must work
+      //         regardless of whether the custom controls bar is currently visible.
       if (
         !isPlayerLocked &&
-        !showControls &&
         !showSettings &&
         !showChatOverlay &&
         playerRef.current
@@ -1231,9 +1437,13 @@ const Player = ({route}: Props): React.JSX.Element => {
         if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
         longPressTimerRef.current = setTimeout(() => {
           if (!isMovingRef.current) {
+            // Remember whether controls were visible so we can restore them on release
+            wasShowingControlsBeforeFFRef.current = showControlsRef.current;
+            // Hide controls so the fast-forward toast is the only UI element
+            setShowControls(false);
             isFastForwardingRef.current = true;
             setIsFastForwarding(true);
-            setToastMessage(`Fast Forward ${fastForwardRate.toFixed(1)}x`);
+            setToastMessage(`⚡ ${fastForwardRate.toFixed(1)}x`);
             setShowToast(true);
             longPressTimerRef.current = null;
           } else {
@@ -1244,17 +1454,37 @@ const Player = ({route}: Props): React.JSX.Element => {
     },
     [
       isPlayerLocked,
-      showControls,
       showSettings,
       showChatOverlay,
       fastForwardRate,
+      setShowControls,
       setShowToast,
       setToastMessage,
+      getPinchDistance,
     ],
   );
 
   const handleTouchMove = useCallback(
     (e: any) => {
+      // Handle pinch-to-zoom
+      if (e.nativeEvent.touches.length === 2 && isPinchingRef.current) {
+        const newDist = getPinchDistance(e.nativeEvent.touches);
+        if (
+          lastPinchDistanceRef.current !== null &&
+          lastPinchDistanceRef.current > 0
+        ) {
+          const ratio = newDist / lastPinchDistanceRef.current;
+          const newScale = Math.min(
+            Math.max(videoScaleRef.current * ratio, 0.5),
+            4.0,
+          );
+          videoScaleRef.current = newScale;
+          setVideoScale(newScale);
+        }
+        lastPinchDistanceRef.current = newDist;
+        return;
+      }
+
       const deltaX = Math.abs(e.nativeEvent.pageX - touchStartXRef.current);
       const deltaY = Math.abs(e.nativeEvent.pageY - touchStartYRef.current);
       const MIN_MOVE_DISTANCE = 10;
@@ -1269,27 +1499,65 @@ const Player = ({route}: Props): React.JSX.Element => {
           isFastForwardingRef.current = false;
           setShowToast(false);
           setToastMessage('');
+          // Restore controls to the state they were in before fast-forward activated
+          setShowControls(wasShowingControlsBeforeFFRef.current);
         }
       }
     },
-    [setShowToast, setToastMessage],
+    [setShowToast, setToastMessage, setShowControls, getPinchDistance],
   );
 
-  const handleTouchEnd = useCallback(() => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-    if (isFastForwardingRef.current) {
-      setIsFastForwarding(false);
-      isFastForwardingRef.current = false;
-      setShowToast(false);
-      setToastMessage('');
-    }
-    setTimeout(() => {
-      isMovingRef.current = false;
-    }, 50);
-  }, [setShowToast, setToastMessage]);
+  const handleTouchEnd = useCallback(
+    (e: any) => {
+      // End pinch when fewer than 2 fingers remain
+      if ((e.nativeEvent.touches?.length ?? 0) < 2) {
+        isPinchingRef.current = false;
+        lastPinchDistanceRef.current = null;
+      }
+
+      const touchDuration = Date.now() - touchStartTimeRef.current;
+      const wasFastForwarding = isFastForwardingRef.current;
+
+      // Always clear any pending long-press timer
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+
+      if (wasFastForwarding) {
+        // ── Fast-forward release: stop FF and restore controls to their prior state
+        setIsFastForwarding(false);
+        isFastForwardingRef.current = false;
+        setShowToast(false);
+        setToastMessage('');
+        // Restore whatever visibility state was active before FF started
+        setShowControls(wasShowingControlsBeforeFFRef.current);
+      } else if (
+        !isMovingRef.current &&
+        touchDuration < FAST_FORWARD_DELAY_MS
+      ) {
+        // ── Plain tap (no movement, shorter than long-press threshold):
+        //    toggle the custom controls bar for a modern player feel.
+        if (!isPlayerLocked && !showSettings) {
+          const nextVisible = !showControlsRef.current;
+          setShowControls(nextVisible);
+        }
+      }
+
+      // Reset movement flag slightly deferred to avoid false positives
+      setTimeout(() => {
+        isMovingRef.current = false;
+      }, 50);
+    },
+    [
+      setShowToast,
+      setToastMessage,
+      setShowControls,
+      setIsFastForwarding,
+      isPlayerLocked,
+      showSettings,
+    ],
+  );
 
   const {videoPositionRef, handleProgress: baseHandleProgress} =
     usePlayerProgress({
@@ -1858,6 +2126,15 @@ const Player = ({route}: Props): React.JSX.Element => {
         shouldCache: true,
         ...(selectedStream?.type === 'm3u8' && {type: 'm3u8'}),
         headers: selectedStream?.headers,
+        // ── HDR / SDR bitrate policy ─────────────────────────────────────────
+        // SDR mode: cap at 8 Mbps so ExoPlayer / AVPlayer falls back to the
+        //   SDR adaptive rung and never selects an HDR rendition.
+        // HDR modes (auto / hdr10 / hlg / dolby_vision): remove all bitrate
+        //   caps so the ABR algorithm is free to climb to the highest-quality
+        //   (potentially HDR-flagged) rendition the device can decode.
+        //   ExoPlayer negotiates HDR automatically based on the connected
+        //   display and device decoder capabilities; no extra props required.
+        ...(hdrMode === 'sdr' ? {maxBitRate: 8_000_000} : {}),
         metadata: {
           title: route.params?.primaryTitle || activeEpisode?.title || '',
           subtitle: activeEpisode?.title || '',
@@ -1983,6 +2260,8 @@ const Player = ({route}: Props): React.JSX.Element => {
       sendTimeUpdate,
       isSyncingVideo,
       setVideoDuration,
+      hdrMode,
+      isHDRActive,
     ],
   );
 
@@ -2082,29 +2361,35 @@ const Player = ({route}: Props): React.JSX.Element => {
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}>
-        <TouchableOpacity
-          activeOpacity={1}
-          className="flex-1"
-          onTouchStart={e => e.stopPropagation()}
-          onTouchMove={e => e.stopPropagation()}
-          onTouchEnd={e => e.stopPropagation()}>
-          {showPlayer && (
-            <VideoPlayer
-              key={
-                activeEpisode?.link
-                  ? activeEpisode.link + keyForPlayer
-                  : keyForPlayer
-              }
-              {...videoPlayerProps}
-            />
-          )}
-        </TouchableOpacity>
+        <View style={{flex: 1, overflow: 'hidden'}}>
+          <View style={{flex: 1, transform: [{scale: videoScale}]}}>
+            {showPlayer && (
+              <VideoPlayer
+                key={
+                  activeEpisode?.link
+                    ? activeEpisode.link + keyForPlayer
+                    : keyForPlayer
+                }
+                {...videoPlayerProps}
+              />
+            )}
+          </View>
+        </View>
 
+        {/* ── Lock overlay (when player is locked) ───────────────────────────── */}
         {isPlayerLocked && (
           <TouchableOpacity
             activeOpacity={1}
             onPress={handleLockedScreenTap}
-            className="absolute top-0 left-0 right-0 bottom-0 z-40 bg-transparent"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 40,
+              backgroundColor: 'transparent',
+            }}
           />
         )}
 
@@ -2215,24 +2500,44 @@ const Player = ({route}: Props): React.JSX.Element => {
             style={[lockButtonStyle]}
             className="absolute top-5 right-5 flex-row items-center gap-4 z-50">
             {/* Episode button (new) – shown when episode list is available */}
+            {/* Episode Browse button – always visible when an episode list exists */}
             {route.params?.episodeList &&
-              activeEpisode &&
-              route.params.episodeList.findIndex(
-                e => e.link === activeEpisode.link,
-              ) !== -1 &&
-              route.params.episodeList.findIndex(
-                e => e.link === activeEpisode.link,
-              ) <
-                route.params.episodeList.length - 1 &&
-              videoDuration > 0 &&
-              videoCurrentTime / videoDuration > 0.6 && (
+              route.params.episodeList.length > 0 && (
                 <TouchableOpacity
-                  className="flex-row items-center opacity-60"
-                  onPress={handleNextEpisode}>
-                  <Text className="text-white text-base">Next</Text>
-                  <MaterialIcons name="skip-next" size={28} color="white" />
+                  onPress={() => setShowEpisodePanel(!showEpisodePanel)}
+                  className="opacity-70 p-2 rounded-full">
+                  <MaterialIcons
+                    name="list"
+                    color={showEpisodePanel ? primary : 'hsl(0, 0%, 70%)'}
+                    size={26}
+                  />
                 </TouchableOpacity>
               )}
+            {/* HDR on/off toggle – beside settings */}
+            <TouchableOpacity
+              activeOpacity={0.75}
+              onPress={() => setHDRMode(hdrMode === 'sdr' ? 'auto' : 'sdr')}
+              style={{
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+                borderRadius: 6,
+                borderWidth: 1.5,
+                borderColor: isHDRActive ? primary : 'rgba(255,255,255,0.22)',
+                backgroundColor: isHDRActive
+                  ? `${primary}25`
+                  : 'rgba(255,255,255,0.06)',
+              }}>
+              <Text
+                style={{
+                  color: isHDRActive ? primary : 'rgba(255,255,255,0.40)',
+                  fontSize: 10,
+                  fontWeight: '900',
+                  letterSpacing: 2,
+                  textDecorationLine: isHDRActive ? 'none' : 'line-through',
+                }}>
+                HDR
+              </Text>
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={() => {
                 setActiveTab('general');
@@ -2395,7 +2700,7 @@ const Player = ({route}: Props): React.JSX.Element => {
             <TouchableOpacity
               className="flex-row gap-1 items-center opacity-60"
               onPress={handleResizeMode}>
-              <MaterialIcons name="fit-screen" size={28} color="white" />
+              <MaterialIcons name="fit-screen" size={26} color="white" />
               <Text className="text-white text-sm min-w-[38px]">
                 {resizeMode === ResizeMode.NONE
                   ? 'Fit'
@@ -2407,7 +2712,36 @@ const Player = ({route}: Props): React.JSX.Element => {
               </Text>
             </TouchableOpacity>
 
-            {/* ── NEW: Episodes button – shows episode panel without closing player */}
+            {/* Next Episode button (only when near the end) */}
+            {!Platform.isTV &&
+              route.params?.episodeList &&
+              activeEpisode &&
+              route.params.episodeList.findIndex(
+                e => e.link === activeEpisode.link,
+              ) !== -1 &&
+              route.params.episodeList.findIndex(
+                e => e.link === activeEpisode.link,
+              ) <
+                route.params.episodeList.length - 1 &&
+              videoDuration > 0 &&
+              videoCurrentTime / videoDuration > 0.6 && (
+                <TouchableOpacity
+                  className="flex-row gap-1 items-center opacity-80"
+                  onPress={handleNextEpisode}
+                  style={{
+                    backgroundColor: primary + '22',
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: primary + '55',
+                  }}>
+                  <MaterialIcons name="skip-next" size={18} color={primary} />
+                  <Text className="text-white text-sm font-semibold ml-1">
+                    Next Ep
+                  </Text>
+                </TouchableOpacity>
+              )}
           </Animated.View>
         )}
       </View>
@@ -2778,15 +3112,103 @@ const Player = ({route}: Props): React.JSX.Element => {
             )}
 
             {activeTab === 'server' && (
-              <View className="flex flex-row w-full h-full p-1 px-4">
-                <ScrollView className="border-r border-white/50">
-                  <Text className="w-full text-center text-white text-lg font-extrabold">
+              <View
+                style={{
+                  flex: 1,
+                  flexDirection: 'row',
+                  width: '100%',
+                  height: '100%',
+                  paddingHorizontal: 16,
+                  paddingTop: 4,
+                }}>
+                {/* Left column: Servers */}
+                <ScrollView
+                  style={{
+                    borderRightWidth: 1,
+                    borderRightColor: 'rgba(255,255,255,0.15)',
+                    paddingRight: 8,
+                    flex: 1,
+                  }}>
+                  {/* Current resolution badge */}
+                  <View
+                    style={{
+                      backgroundColor: `${primary}18`,
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: `${primary}40`,
+                      padding: 10,
+                      marginBottom: 10,
+                      alignItems: 'center',
+                    }}>
+                    <Text
+                      style={{
+                        color: 'rgba(255,255,255,0.45)',
+                        fontSize: 9,
+                        fontWeight: '700',
+                        letterSpacing: 2,
+                        marginBottom: 2,
+                      }}>
+                      NOW PLAYING
+                    </Text>
+                    <Text
+                      style={{
+                        color: primary,
+                        fontSize: 22,
+                        fontWeight: '900',
+                        letterSpacing: 1,
+                      }}>
+                      {videoTracks && videoTracks.length > 0
+                        ? formatQuality(
+                            (
+                              videoTracks[selectedQualityIndex] ??
+                              videoTracks[0]
+                            )?.height?.toString() || 'auto',
+                          )
+                        : 'Auto'}
+                    </Text>
+                    {videoTracks &&
+                      videoTracks.length > 0 &&
+                      (videoTracks[selectedQualityIndex] ?? videoTracks[0])
+                        ?.bitrate && (
+                        <Text
+                          style={{
+                            color: 'rgba(255,255,255,0.35)',
+                            fontSize: 10,
+                            marginTop: 2,
+                          }}>
+                          {Math.round(
+                            ((
+                              videoTracks[selectedQualityIndex] ??
+                              videoTracks[0]
+                            )?.bitrate || 0) / 1000,
+                          )}{' '}
+                          kbps
+                        </Text>
+                      )}
+                  </View>
+
+                  <Text
+                    style={{
+                      color: 'white',
+                      fontSize: 15,
+                      fontWeight: '800',
+                      textAlign: 'center',
+                      marginBottom: 6,
+                    }}>
                     Server
                   </Text>
                   {streamData?.length > 0 &&
                     streamData?.map((track, i) => (
                       <TouchableOpacity
-                        className="flex-row gap-2 items-center rounded-md my-1 overflow-hidden ml-2"
+                        style={{
+                          flexDirection: 'row',
+                          gap: 8,
+                          alignItems: 'center',
+                          borderRadius: 6,
+                          marginVertical: 4,
+                          overflow: 'hidden',
+                          marginLeft: 8,
+                        }}
                         key={i}
                         onPress={() => {
                           setSelectedStream(track);
@@ -2794,8 +3216,10 @@ const Player = ({route}: Props): React.JSX.Element => {
                           playerRef?.current?.resume();
                         }}>
                         <Text
-                          className={'text-base capitalize font-semibold'}
                           style={{
+                            fontSize: 14,
+                            textTransform: 'capitalize',
+                            fontWeight: '600',
                             color:
                               track.link === selectedStream.link
                                 ? primary
@@ -2804,19 +3228,69 @@ const Player = ({route}: Props): React.JSX.Element => {
                           {track.server}
                         </Text>
                         {track.link === selectedStream.link && (
-                          <MaterialIcons name="check" size={20} color="white" />
+                          <MaterialIcons
+                            name="check"
+                            size={20}
+                            color={primary}
+                          />
                         )}
                       </TouchableOpacity>
                     ))}
                 </ScrollView>
-                <ScrollView>
-                  <Text className="w-full text-center text-white text-lg font-extrabold">
+
+                {/* Right column: Quality tracks */}
+                <ScrollView style={{flex: 1, paddingLeft: 8}}>
+                  <Text
+                    style={{
+                      color: 'white',
+                      fontSize: 15,
+                      fontWeight: '800',
+                      textAlign: 'center',
+                      marginBottom: 6,
+                    }}>
                     Quality
                   </Text>
+                  {/* Auto option */}
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: 'row',
+                      gap: 8,
+                      alignItems: 'center',
+                      borderRadius: 6,
+                      marginVertical: 4,
+                      marginLeft: 8,
+                    }}
+                    onPress={() => {
+                      setSelectedVideoTrack({
+                        type: SelectedVideoTrackType.AUTO,
+                      });
+                      setSelectedQualityIndex(1000);
+                    }}>
+                    <Text
+                      style={{
+                        fontSize: 14,
+                        fontWeight: '600',
+                        color:
+                          selectedQualityIndex === 1000 ? primary : 'white',
+                      }}>
+                      Auto
+                    </Text>
+                    {selectedQualityIndex === 1000 && (
+                      <MaterialIcons name="check" size={20} color={primary} />
+                    )}
+                  </TouchableOpacity>
                   {videoTracks &&
                     videoTracks.map((track: any, i: any) => (
                       <TouchableOpacity
-                        className="flex-row gap-2 items-center rounded-md my-1 overflow-hidden ml-2"
+                        style={{
+                          flexDirection: 'row',
+                          gap: 6,
+                          alignItems: 'center',
+                          borderRadius: 6,
+                          marginVertical: 4,
+                          overflow: 'hidden',
+                          marginLeft: 8,
+                        }}
                         key={i}
                         onPress={() => {
                           setSelectedVideoTrack({
@@ -2826,26 +3300,34 @@ const Player = ({route}: Props): React.JSX.Element => {
                           setSelectedQualityIndex(i);
                         }}>
                         <Text
-                          className={'text-base font-semibold'}
                           style={{
+                            fontSize: 14,
+                            fontWeight: '600',
                             color:
                               selectedQualityIndex === i ? primary : 'white',
                           }}>
                           {track.height + 'p'}
                         </Text>
                         <Text
-                          className={'text-sm italic'}
                           style={{
+                            fontSize: 11,
+                            fontStyle: 'italic',
                             color:
-                              selectedQualityIndex === i ? primary : 'white',
+                              selectedQualityIndex === i
+                                ? primary
+                                : 'rgba(255,255,255,0.5)',
                           }}>
-                          {'Bitrate-' +
-                            track.bitrate +
-                            ' | Codec-' +
-                            (track?.codecs || 'unknown')}
+                          {Math.round((track.bitrate || 0) / 1000)}k
+                          {track?.codecs
+                            ? ` · ${track.codecs.split('.')[0]}`
+                            : ''}
                         </Text>
                         {selectedQualityIndex === i && (
-                          <MaterialIcons name="check" size={20} color="white" />
+                          <MaterialIcons
+                            name="check"
+                            size={18}
+                            color={primary}
+                          />
                         )}
                       </TouchableOpacity>
                     ))}
@@ -2906,6 +3388,241 @@ const Player = ({route}: Props): React.JSX.Element => {
                     )}
                   </TouchableOpacity>
                 ))}
+              </ScrollView>
+            )}
+
+            {/* ── HDR Settings Tab ── */}
+            {activeTab === 'hdr' && (
+              <ScrollView className="w-full h-full p-1 px-4">
+                <Text className="text-lg font-bold text-center text-white mb-3">
+                  HDR Playback
+                </Text>
+
+                {/* Device capability card */}
+                <View
+                  style={{
+                    backgroundColor: 'rgba(255,255,255,0.05)',
+                    borderRadius: 10,
+                    padding: 12,
+                    marginBottom: 12,
+                  }}>
+                  <Text
+                    style={{
+                      color: 'rgba(255,255,255,0.45)',
+                      fontSize: 10,
+                      fontWeight: '700',
+                      letterSpacing: 2,
+                      marginBottom: 8,
+                    }}>
+                    DEVICE SUPPORT
+                  </Text>
+                  {(
+                    [
+                      {
+                        label: 'HDR10',
+                        ok: hdrCapabilities.isHDR10Supported,
+                      },
+                      {
+                        label: 'HLG (Hybrid Log-Gamma)',
+                        ok: hdrCapabilities.isHLGSupported,
+                      },
+                      {
+                        label: 'Dolby Vision',
+                        ok: hdrCapabilities.isDolbyVisionSupported,
+                      },
+                    ] as {label: string; ok: boolean}[]
+                  ).map(item => (
+                    <View
+                      key={item.label}
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        paddingVertical: 4,
+                      }}>
+                      <Text style={{color: 'white', fontSize: 13}}>
+                        {item.label}
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                        }}>
+                        <MaterialIcons
+                          name={item.ok ? 'check-circle' : 'cancel'}
+                          size={15}
+                          color={item.ok ? '#4ade80' : '#f87171'}
+                        />
+                        <Text
+                          style={{
+                            color: item.ok ? '#4ade80' : '#f87171',
+                            fontSize: 12,
+                          }}>
+                          {item.ok ? 'Supported' : 'Not Supported'}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                  {hdrCapabilities.maxLuminance !== null && (
+                    <Text
+                      style={{
+                        color: 'rgba(255,255,255,0.4)',
+                        fontSize: 11,
+                        marginTop: 6,
+                      }}>
+                      Peak Luminance: {hdrCapabilities.maxLuminance} nits
+                    </Text>
+                  )}
+                </View>
+
+                {/* Current stream HDR status card */}
+                <View
+                  style={{
+                    backgroundColor: 'rgba(255,255,255,0.05)',
+                    borderRadius: 10,
+                    padding: 12,
+                    marginBottom: 12,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 10,
+                  }}>
+                  <MaterialIcons
+                    name={hasHDRTracks ? 'hd' : 'sd'}
+                    size={22}
+                    color={hasHDRTracks ? primary : 'rgba(255,255,255,0.5)'}
+                  />
+                  <View style={{flex: 1}}>
+                    <Text
+                      style={{
+                        color: hasHDRTracks ? primary : 'white',
+                        fontSize: 13,
+                        fontWeight: '600',
+                      }}>
+                      {hasHDRTracks
+                        ? 'HDR tracks detected'
+                        : 'SDR stream (no HDR tracks)'}
+                    </Text>
+                    <Text
+                      style={{color: 'rgba(255,255,255,0.4)', fontSize: 11}}>
+                      {hasHDRTracks
+                        ? 'HEVC / AV1 / Dolby Vision codec found in stream'
+                        : 'Stream appears to be standard dynamic range only'}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Mode selection */}
+                <Text
+                  style={{
+                    color: 'rgba(255,255,255,0.45)',
+                    fontSize: 10,
+                    fontWeight: '700',
+                    letterSpacing: 2,
+                    marginBottom: 8,
+                  }}>
+                  PLAYBACK MODE
+                </Text>
+                {(
+                  [
+                    {
+                      mode: 'auto' as HDRMode,
+                      label: 'Auto',
+                      desc: 'Let the device & stream decide (recommended)',
+                      iconName: 'auto-awesome',
+                      requiresCap: true,
+                    },
+                    {
+                      mode: 'sdr' as HDRMode,
+                      label: 'SDR Only',
+                      desc: 'Force standard dynamic range (caps bitrate to 8 Mbps)',
+                      iconName: 'brightness-low',
+                      requiresCap: true,
+                    },
+                    {
+                      mode: 'hdr10' as HDRMode,
+                      label: 'HDR10',
+                      desc: 'High dynamic range — wide color & high luminance',
+                      iconName: 'wb-sunny',
+                      requiresCap: hdrCapabilities.isHDR10Supported,
+                    },
+                    {
+                      mode: 'hlg' as HDRMode,
+                      label: 'HLG',
+                      desc: 'Hybrid Log-Gamma — broadcast HDR standard',
+                      iconName: 'wb-sunny',
+                      requiresCap: hdrCapabilities.isHLGSupported,
+                    },
+                    {
+                      mode: 'dolby_vision' as HDRMode,
+                      label: 'Dolby Vision',
+                      desc: 'Dynamic per-scene HDR metadata',
+                      iconName: 'stars',
+                      requiresCap: hdrCapabilities.isDolbyVisionSupported,
+                    },
+                  ] as {
+                    mode: HDRMode;
+                    label: string;
+                    desc: string;
+                    iconName: string;
+                    requiresCap: boolean;
+                  }[]
+                ).map(({mode, label, desc, iconName, requiresCap}) => {
+                  const isDisabled = !requiresCap;
+                  const isSelected = hdrMode === mode;
+                  return (
+                    <TouchableOpacity
+                      key={mode}
+                      disabled={isDisabled}
+                      onPress={() => {
+                        setHDRMode(mode);
+                        setShowSettings(false);
+                      }}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        borderRadius: 8,
+                        paddingVertical: 8,
+                        paddingHorizontal: 10,
+                        marginBottom: 4,
+                        opacity: isDisabled ? 0.3 : 1,
+                        backgroundColor: isSelected
+                          ? `${primary}22`
+                          : 'transparent',
+                        borderWidth: isSelected ? 1 : 0,
+                        borderColor: isSelected
+                          ? `${primary}55`
+                          : 'transparent',
+                      }}>
+                      <MaterialIcons
+                        name={iconName as any}
+                        size={20}
+                        color={isSelected ? primary : 'rgba(255,255,255,0.7)'}
+                        style={{marginRight: 10}}
+                      />
+                      <View style={{flex: 1}}>
+                        <Text
+                          style={{
+                            color: isSelected ? primary : 'white',
+                            fontSize: 14,
+                            fontWeight: isSelected ? '700' : '400',
+                          }}>
+                          {label}
+                        </Text>
+                        <Text
+                          style={{
+                            color: 'rgba(255,255,255,0.4)',
+                            fontSize: 11,
+                          }}>
+                          {desc}
+                        </Text>
+                      </View>
+                      {isSelected && (
+                        <MaterialIcons name="check" size={18} color={primary} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             )}
           </View>

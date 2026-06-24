@@ -2,7 +2,6 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.vega.next">
 
-    <!-- ========== PERMISSIONS ========== -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
@@ -16,8 +15,9 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+    
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-    <!-- ========== QUERIES ========== -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
@@ -33,7 +33,6 @@
         </intent>
     </queries>
 
-    <!-- ========== APPLICATION ========== -->
     <application
         android:name=".MainApplication"
         android:label="@string/app_name"
@@ -41,37 +40,27 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="true"
         android:theme="@style/AppTheme"
-        android:requestLegacyExternalStorage="true">
-
-        <!-- ========== ONESIGNAL / NOTIFICATION METADATA ========== -->
-        <!-- Small icon for notifications (used by OneSignal & Notifee) -->
-        <meta-data
+        android:requestLegacyExternalStorage="true"
+        android:usesCleartextTraffic="true"> <meta-data
             android:name="com.onesignal.NotificationSmallIcon"
             android:resource="@drawable/ic_notification" />
-        <!-- Notification accent color -->
         <meta-data
             android:name="com.onesignal.NotificationAccentColor"
             android:resource="@color/ic_notification" />
-
-        <!-- Notifee default fallback icon (prevents foreground service crash) -->
         <meta-data
             android:name="app.notifee.core.default_notification_icon"
             android:resource="@drawable/ic_notification" />
         <meta-data
             android:name="app.notifee.core.default_notification_color"
             android:resource="@color/ic_notification" />
-
-        <!-- OneSignal legacy icon reference (keep for compatibility) -->
         <meta-data
             android:name="com.onesignal.NotificationIcon"
             android:resource="@drawable/ic_stat_onesignal_default" />
 
-        <!-- Google Cast -->
         <meta-data
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
             android:value="com.reactnative.googlecast.GoogleCastOptionsProvider" />
 
-        <!-- Expo Updates -->
         <meta-data android:name="expo.modules.updates.ENABLED" android:value="true" />
         <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS" />
         <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0" />
@@ -82,24 +71,21 @@
             android:name="expo.modules.updates.EXPO_RUNTIME_VERSION"
             android:value="@string/expo_runtime_version" />
 
-        <!-- ========== SERVICES ========== -->
-        <!-- ExoPlayer Video Playback -->
         <service
             android:name="com.brentvatne.exoplayer.VideoPlaybackService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback">
+            android:foregroundServiceType="mediaPlayback"
+            tools:targetApi="29">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
 
-        <!-- OneSignal Notification Extender -->
         <service
             android:name="com.onesignal.NotificationExtenderService"
             android:permission="android.permission.BIND_JOB_SERVICE"
             android:exported="false" />
 
-        <!-- Firebase Messaging -->
         <service
             android:name="com.google.firebase.messaging.FirebaseMessagingService"
             android:exported="true"
@@ -109,15 +95,13 @@
             </intent-filter>
         </service>
 
-        <!-- Notifee Foreground Service -->
         <service
             android:name="app.notifee.core.ForegroundService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
-        <!-- ========== RECEIVERS ========== -->
         <receiver
-            android:name="com.onesignal.GcmBroadcastReceiver"
+            android:name="com.onesignal.FCMBroadcastReceiver"
             android:permission="com.google.android.c2dm.permission.SEND"
             android:exported="true">
             <intent-filter>
@@ -127,7 +111,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- ========== ACTIVITIES ========== -->
         <activity
             android:name=".MainActivity"
             android:label="@string/app_name"
@@ -149,7 +132,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Google Cast Expanded Controller -->
         <activity android:name="com.reactnative.googlecast.RNGCExpandedControllerActivity" />
     </application>
 

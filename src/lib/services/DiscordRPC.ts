@@ -1,17 +1,15 @@
-import BackgroundTimer from 'react-native-background-timer';
-
 class DiscordRPCService {
   private ws: WebSocket | null = null;
   private token: string | null = null;
-  private heartbeatInterval: number | null = null;
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private sequence: number | null = null;
   private isIdentified: boolean = false;
 
   private reconnectTimeout: any = null;
-  private readonly APP_ID = 'YOUR_DISCORD_APP_ID';
+  private readonly APP_ID = 'YOUR_APP_ID';
   
   // 🔴 Your Webhook URL
-  private readonly WEBHOOK_URL = 'YOUR_WEBHOOK_URL';
+  private readonly WEBHOOK_URL = 'https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN';
 
   private pendingPresence: {
     title: string;
@@ -289,16 +287,16 @@ class DiscordRPCService {
   private startHeartbeat(interval: number) {
     this.stopHeartbeat();
 
-    this.heartbeatInterval = BackgroundTimer.setInterval(() => {
+    this.heartbeatInterval = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ op: 1, d: this.sequence }));
       }
-    }, interval) as any;
+    }, interval);
   }
 
   private stopHeartbeat() {
     if (this.heartbeatInterval !== null) {
-      BackgroundTimer.clearInterval(this.heartbeatInterval);
+      clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
   }

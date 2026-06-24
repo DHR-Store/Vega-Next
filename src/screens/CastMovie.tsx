@@ -13,7 +13,7 @@ import {MaterialCommunityIcons, Ionicons} from '@expo/vector-icons';
 import LinearGradient from 'react-native-linear-gradient';
 import useThemeStore from '../lib/zustand/themeStore';
 
-const TMDB_API_KEY = 'YOUR_TMDB_API';
+const TMDB_API_KEY = 'YOUR_TMDB_API_KEY';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 

@@ -56,6 +56,9 @@ export default function Login() {
     email: string;
   } | null>(null);
 
+  // State for editing the name during the profile step
+  const [profileName, setProfileName] = useState('');
+
   const navigation = useNavigation<LoginNavigationProp>();
 
   // ── Validation ─────────────────────────────────────────────────────────────
@@ -112,6 +115,7 @@ export default function Login() {
 
       // Show the profile photo step briefly before entering the app
       setLoggedInUser({name: user.name, email: user.email});
+      setProfileName(user.name);
     } catch (err) {
       const msg = extractMessage(err);
       setError(msg);
@@ -121,8 +125,23 @@ export default function Login() {
     }
   };
 
-  const goToApp = () => {
-    DeviceEventEmitter.emit('userLoggedIn', loggedInUser);
+  const goToApp = async () => {
+    if (!loggedInUser) return;
+
+    // Check if the user modified their name
+    const finalName = profileName.trim() || loggedInUser.name;
+
+    if (finalName !== loggedInUser.name) {
+      setLoading(true);
+      await userSession.updateName(finalName);
+      setLoading(false);
+    }
+
+    const updatedUser = userSession.getCurrentUser() || {
+      ...loggedInUser,
+      name: finalName,
+    };
+    DeviceEventEmitter.emit('userLoggedIn', updatedUser);
     navigation.reset({index: 0, routes: [{name: 'MainStack'}]});
   };
 
@@ -143,24 +162,37 @@ export default function Login() {
       <View style={styles.profileStep}>
         <Text style={styles.profileStepTitle}>You're in! 🎉</Text>
         <Text style={styles.profileStepSub}>
-          Set a profile photo or continue to the app.
+          Set your name and profile photo or continue to the app.
         </Text>
 
         {/* Avatar with photo picker */}
         <ProfileAvatar size={110} editable={true} />
 
-        <Text style={styles.profileName}>{loggedInUser.name}</Text>
+        {/* Editable Name Input */}
+        <TextInput
+          style={styles.nameInput}
+          value={profileName}
+          onChangeText={setProfileName}
+          placeholder="Enter your name"
+          placeholderTextColor="#9ca3af"
+          autoCapitalize="words"
+        />
         <Text style={styles.profileEmail}>{loggedInUser.email}</Text>
 
         <TouchableOpacity
-          style={styles.primaryBtn}
+          style={[styles.primaryBtn, {opacity: loading ? 0.7 : 1}]}
           activeOpacity={0.85}
+          disabled={loading}
           onPress={goToApp}>
-          <Text style={styles.primaryBtnText}>Continue to App</Text>
+          {loading ? (
+            <ActivityIndicator color="#000" />
+          ) : (
+            <Text style={styles.primaryBtnText}>Continue to App</Text>
+          )}
         </TouchableOpacity>
 
         <Text style={styles.profileSkip}>
-          You can change your photo anytime from your profile settings.
+          You can change your photo and name anytime from your profile settings.
         </Text>
       </View>
     );
@@ -442,11 +474,19 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     lineHeight: 20,
   },
-  profileName: {
+  nameInput: {
+    width: '100%',
+    backgroundColor: '#1a1a1a',
     color: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+    marginTop: 16,
     fontSize: 18,
     fontWeight: '700',
-    marginTop: 16,
+    textAlign: 'center',
   },
   profileEmail: {
     color: '#6b7280',

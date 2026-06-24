@@ -8,12 +8,9 @@ import {
   TouchableOpacity,
   Modal,
   Pressable,
-  StyleSheet,
-  PanResponder,
-  Animated,
-  Easing,
   useWindowDimensions,
   ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
 import React, {useCallback, useMemo, useRef, useState, useEffect} from 'react';
 import {
@@ -31,7 +28,6 @@ import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useContentStore from '../../lib/zustand/contentStore';
 import {MaterialCommunityIcons} from '@expo/vector-icons';
 import useThemeStore from '../../lib/zustand/themeStore';
-// FIX 1: Import useIsFocused to detect when screen loses/gains focus
 import {useNavigation, useIsFocused} from '@react-navigation/native';
 import useWatchListStore from '../../lib/zustand/watchListStore';
 import {useContentDetails} from '../../lib/hooks/useContentInfo';
@@ -39,44 +35,58 @@ import {QueryErrorBoundary} from '../../components/ErrorBoundary';
 import YoutubePlayer from 'react-native-youtube-iframe';
 
 // --- CONFIGURATION ---
-const TMDB_API_KEY = '9d2bff12ed955c7f1f74b83187f188ae';
+const TMDB_API_KEY = 'YOUR TMDB API';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 // --- UTILITIES ---
 
+/**
+ * Extracts a YouTube video ID from either a raw ID or full URL.
+ */
+const extractYouTubeId = (input: string): string | null => {
+  if (!input) return null;
+  if (/^[a-zA-Z0-9_-]{11}$/.test(input)) return input;
+  try {
+    const url = new URL(input.startsWith('http') ? input : `https://${input}`);
+    if (url.hostname.includes('youtu')) {
+      const params = new URLSearchParams(url.search);
+      if (params.get('v')) return params.get('v');
+      const path = url.pathname.split('/');
+      if (path.length > 1) return path[path.length - 1];
+    }
+  } catch {}
+  return null;
+};
+
+/**
+ * Robust TMDB trailer lookup – three fallback strategies.
+ */
 const getTmdbTrailer = async (
   title: string,
   type: string = 'movie',
   year?: string,
   imdbId?: string,
 ): Promise<string | null> => {
-  if (!TMDB_API_KEY) {
-    console.warn('TMDB API Key missing. Trailer fallback disabled.');
-    return null;
-  }
-
+  if (!TMDB_API_KEY) return null;
   try {
     const searchType = type === 'series' || type === 'tv' ? 'tv' : 'movie';
     let tmdbId: number | null = null;
 
-    // --- STRATEGY 1: FIND BY IMDB ID (Most Accurate) ---
+    // 1. IMDB ID
     if (imdbId) {
       try {
         const findUrl = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
         const findRes = await fetch(findUrl);
         const findData = await findRes.json();
-
         const results =
           searchType === 'movie' ? findData.movie_results : findData.tv_results;
-        if (results && results.length > 0) {
-          tmdbId = results[0].id;
-        }
+        if (results?.length > 0) tmdbId = results[0].id;
       } catch (e) {
-        console.warn('IMDB lookup failed, falling back to search');
+        console.warn('IMDB lookup failed');
       }
     }
 
-    // --- STRATEGY 2: SEARCH BY TITLE + YEAR (Strict) ---
+    // 2. Title + year
     if (!tmdbId) {
       const query = encodeURIComponent(title);
       let yearParam = '';
@@ -86,36 +96,27 @@ const getTmdbTrailer = async (
             ? `&year=${year}`
             : `&first_air_date_year=${year}`;
       }
-
       const searchUrl = `${TMDB_BASE_URL}/search/${searchType}?api_key=${TMDB_API_KEY}&query=${query}${yearParam}`;
       const searchRes = await fetch(searchUrl);
       const searchData = await searchRes.json();
-
-      if (searchData.results && searchData.results.length > 0) {
-        tmdbId = searchData.results[0].id;
-      }
+      if (searchData.results?.length > 0) tmdbId = searchData.results[0].id;
     }
 
-    // --- STRATEGY 3: SEARCH BY TITLE ONLY (Fallback) ---
+    // 3. Title only
     if (!tmdbId && year) {
       const query = encodeURIComponent(title);
       const looseUrl = `${TMDB_BASE_URL}/search/${searchType}?api_key=${TMDB_API_KEY}&query=${query}`;
       const looseRes = await fetch(looseUrl);
       const looseData = await looseRes.json();
-
-      if (looseData.results && looseData.results.length > 0) {
-        tmdbId = looseData.results[0].id;
-      }
+      if (looseData.results?.length > 0) tmdbId = looseData.results[0].id;
     }
 
     if (!tmdbId) return null;
 
-    // --- FETCH VIDEOS ---
     const videoUrl = `${TMDB_BASE_URL}/${searchType}/${tmdbId}/videos?api_key=${TMDB_API_KEY}`;
     const videoRes = await fetch(videoUrl);
     const videoData = await videoRes.json();
-
-    if (videoData.results && videoData.results.length > 0) {
+    if (videoData.results?.length > 0) {
       const trailer = videoData.results.find(
         (v: any) =>
           v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'),
@@ -129,11 +130,8 @@ const getTmdbTrailer = async (
   }
 };
 
-// --- COMPONENTS ---
-
-// 3D Flip Header Component
-// FIX 2: Accept `isFocused` and `hasAutoFlippedRef` props to prevent re-init on return
-const FlipHeader = ({
+// --- SIMPLE HERO HEADER (NO FLIP / NO SWIPE) ---
+const HeroHeader = ({
   posterImage,
   trailerId,
   meta,
@@ -141,137 +139,31 @@ const FlipHeader = ({
   setLogoError,
   displayTitle,
   logoError,
-  onInteract,
-  isFetchingTrailer,
-  isFocused, // NEW: screen focus state
-  hasAutoFlippedRef, // NEW: lifted ref to survive re-renders
+  isFocused,
+  showTrailer,
+  onCloseTrailer,
 }: any) => {
-  const [showVideo, setShowVideo] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
-
-  const animatedValue = useRef(new Animated.Value(0)).current;
   const {width} = useWindowDimensions();
-
-  // Calculate correct 16:9 height based on screen width
   const videoHeight = width * (9 / 16);
   const headerHeight = 256;
 
-  // FIX 3: Pause video when screen loses focus (user navigates to Player)
-  // This prevents the YouTube WebView from being in a broken state on return
-  useEffect(() => {
-    if (!isFocused) {
-      setIsPlaying(false);
-    }
-  }, [isFocused]);
-
-  // Animation to show Video (Back Side)
-  const flipToVideo = useCallback(() => {
-    setShowVideo(true);
-    Animated.timing(animatedValue, {
-      toValue: 180,
-      duration: 600,
-      easing: Easing.inOut(Easing.ease),
-      useNativeDriver: true,
-    }).start(({finished}) => {
-      if (finished) {
-        setIsPlaying(true);
-      }
-    });
-  }, [animatedValue]);
-
-  // Animation to show Poster (Front Side)
-  const flipToPoster = useCallback(() => {
-    setIsPlaying(false);
-    setShowVideo(false);
-    Animated.timing(animatedValue, {
-      toValue: 0,
-      duration: 600,
-      easing: Easing.inOut(Easing.ease),
-      useNativeDriver: true,
-    }).start();
-  }, [animatedValue]);
-
-  // FIX 4: Use the lifted `hasAutoFlippedRef` so auto-flip does NOT re-trigger
-  // when returning from Player (even if FlipHeader re-renders)
-  useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (trailerId && !hasAutoFlippedRef.current && !showVideo && isFocused) {
-      timer = setTimeout(() => {
-        flipToVideo();
-        hasAutoFlippedRef.current = true;
-      }, 3000);
-    }
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [trailerId, showVideo, flipToVideo, isFocused, hasAutoFlippedRef]);
-
-  const onStateChange = useCallback((state: string) => {
-    if (state === 'ended') {
-      setIsPlaying(false);
-    }
-  }, []);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dy) < 10;
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        const threshold = 50;
-        if (gestureState.dx > threshold) {
-          if (showVideo) flipToPoster();
-        } else if (gestureState.dx < -threshold) {
-          if (!showVideo) flipToVideo();
-        }
-        if (onInteract) onInteract();
-      },
-    }),
-  ).current;
-
-  // Interpolations
-  const frontInterpolate = animatedValue.interpolate({
-    inputRange: [0, 180],
-    outputRange: ['0deg', '180deg'],
-  });
-
-  const backInterpolate = animatedValue.interpolate({
-    inputRange: [0, 180],
-    outputRange: ['180deg', '360deg'],
-  });
-
-  const frontOpacity = animatedValue.interpolate({
-    inputRange: [89, 90],
-    outputRange: [1, 0],
-  });
-
-  const backOpacity = animatedValue.interpolate({
-    inputRange: [89, 90],
-    outputRange: [0, 1],
-  });
+  const onStateChange = useCallback(
+    (state: string) => {
+      if (state === 'ended') onCloseTrailer?.();
+    },
+    [onCloseTrailer],
+  );
 
   return (
-    <View
-      style={{height: headerHeight, width: '100%', position: 'relative'}}
-      {...panResponder.panHandlers}>
-      {/* --- FRONT SIDE (Poster) --- */}
-      <Animated.View
-        style={{
-          width: '100%',
-          height: '100%',
-          position: 'absolute',
-          backfaceVisibility: 'hidden',
-          transform: [{rotateY: frontInterpolate}, {perspective: 1000}],
-          opacity: frontOpacity,
-          zIndex: showVideo ? 0 : 1,
-        }}>
+    <View style={{height: headerHeight, width: '100%', position: 'relative'}}>
+      {/* Background image + gradient */}
+      <View style={{position: 'absolute', inset: 0}}>
         <Skeleton
           show={infoLoading}
           colorMode="dark"
-          height={'100%'}
-          width={'100%'}>
+          height="100%"
+          width="100%">
           <Image
             source={{uri: posterImage}}
             className="h-[256] w-full"
@@ -302,178 +194,93 @@ const FlipHeader = ({
             </Text>
           )}
         </View>
+      </View>
 
-        {/* --- DOTS FOR FRONT (Poster Active) --- */}
-        <View className="absolute bottom-2 w-full flex-row justify-center items-center gap-2 z-50">
-          <View className="w-2 h-2 rounded-full bg-white scale-125" />
-          {trailerId ? (
-            <TouchableOpacity
-              onPress={flipToVideo}
-              hitSlop={{top: 15, bottom: 15, left: 15, right: 15}}>
-              <View className="w-2 h-2 rounded-full bg-white/30" />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      </Animated.View>
-
-      {/* --- BACK SIDE (Trailer) --- */}
-      <Animated.View
-        style={{
-          width: '100%',
-          height: '100%',
-          position: 'absolute',
-          backfaceVisibility: 'hidden',
-          backgroundColor: 'black',
-          transform: [{rotateY: backInterpolate}, {perspective: 1000}],
-          opacity: backOpacity,
-          zIndex: showVideo ? 1 : 0,
-        }}>
-        {trailerId ? (
+      {/* Trailer overlay (appears on demand) */}
+      {showTrailer && trailerId ? (
+        <View
+          style={{
+            ...StyleSheet.absoluteFillObject,
+            backgroundColor: 'black',
+            zIndex: 20,
+          }}>
           <View
             style={{
               flex: 1,
-              backgroundColor: 'black',
               justifyContent: 'center',
               alignItems: 'center',
             }}>
-            <View
-              style={{
-                height: videoHeight,
-                width: width,
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}>
-              <YoutubePlayer
-                height={videoHeight}
-                width={width}
-                // FIX 5: Only play when screen is focused AND player is ready AND isPlaying
-                play={playerReady && isPlaying && isFocused}
-                videoId={trailerId}
-                mute={true}
-                onReady={() => setPlayerReady(true)}
-                onChangeState={onStateChange}
-                initialPlayerParams={{
-                  controls: true,
-                  modestbranding: true,
-                  loop: false,
-                  rel: false,
-                  iv_load_policy: 3,
-                  cc_load_policy: 0,
-                  fs: false,
-                  playsinline: true,
-                }}
-              />
-            </View>
-
-            <View className="absolute bottom-2 w-full flex-row justify-center items-center gap-2 z-50">
-              <TouchableOpacity
-                onPress={flipToPoster}
-                hitSlop={{top: 15, bottom: 15, left: 15, right: 15}}>
-                <View className="w-2 h-2 rounded-full bg-white/30" />
-              </TouchableOpacity>
-              <View className="w-2 h-2 rounded-full bg-white scale-125" />
-            </View>
+            <YoutubePlayer
+              height={videoHeight}
+              width={width}
+              play={playerReady && isFocused}
+              videoId={trailerId}
+              mute={true}
+              onReady={() => setPlayerReady(true)}
+              onChangeState={onStateChange}
+              initialPlayerParams={{
+                controls: true,
+                modestbranding: true,
+                loop: false,
+                rel: false,
+                iv_load_policy: 3,
+                cc_load_policy: 0,
+                fs: false,
+                playsinline: true,
+              }}
+            />
           </View>
-        ) : (
-          <View className="flex-1 justify-center items-center bg-zinc-900">
-            {isFetchingTrailer ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <View className="items-center gap-2">
-                <Text className="text-white/50 text-xs">No Trailer</Text>
-                <TouchableOpacity onPress={flipToPoster} className="p-2">
-                  <View className="w-2 h-2 rounded-full bg-white/30" />
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        )}
-      </Animated.View>
+          <TouchableOpacity
+            onPress={() => onCloseTrailer?.()}
+            style={{
+              position: 'absolute',
+              top: 20,
+              right: 10,
+              zIndex: 30,
+              padding: 8,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              borderRadius: 20,
+            }}>
+            <Ionicons name="close" size={24} color="white" />
+          </TouchableOpacity>
+        </View>
+      ) : null}
     </View>
   );
 };
 
-function WatchTrailer({
-  route,
-  navigation,
-}: NativeStackScreenProps<
-  HomeStackParamList,
-  'WatchTrailer'
->): React.JSX.Element {
-  const {videoId} = route.params;
-  const {width} = useWindowDimensions();
-  const [playing, setPlaying] = useState(true);
-
-  return (
-    <View style={{flex: 1, backgroundColor: 'black', justifyContent: 'center'}}>
-      <StatusBar hidden />
-      <View style={{width: '100%', aspectRatio: 16 / 9}}>
-        <YoutubePlayer
-          height={width * (9 / 16)}
-          width={width}
-          mute={false}
-          play={playing}
-          videoId={videoId}
-          initialPlayerParams={{
-            controls: true,
-            modestbranding: true,
-          }}
-        />
-      </View>
-
-      <TouchableOpacity
-        onPress={() => navigation.goBack()}
-        style={{
-          position: 'absolute',
-          top: 40,
-          left: 20,
-          padding: 10,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          borderRadius: 20,
-        }}>
-        <Ionicons name="close" size={24} color="white" />
-      </TouchableOpacity>
+const CustomSwitch = ({label, icon, active, onToggle, primaryColor}: any) => (
+  <TouchableOpacity
+    activeOpacity={0.8}
+    onPress={onToggle}
+    className={`flex-1 flex-row items-center p-3 rounded-xl transition-colors duration-300 ${
+      active ? 'bg-[#1A1A1A]' : `bg-[${primaryColor}]`
+    }`}>
+    <MaterialCommunityIcons
+      name={icon}
+      size={20}
+      color={active ? primaryColor : '#FFFFFF'}
+    />
+    <Text
+      className={`text-sm font-semibold ml-2 transition-colors duration-300 ${
+        active ? 'text-gray-400' : 'text-white'
+      }`}>
+      {label}
+    </Text>
+    <View
+      className={`ml-auto w-10 h-5 rounded-full transition-colors duration-300 bg-gray-600`}
+      style={{
+        justifyContent: 'center',
+        alignItems: active ? 'flex-end' : 'flex-start',
+        paddingHorizontal: 2,
+      }}>
+      <View className="w-4 h-4 rounded-full bg-white shadow-md" />
     </View>
-  );
-}
+  </TouchableOpacity>
+);
 
 // --- MAIN INFO COMPONENT ---
-
 type Props = NativeStackScreenProps<HomeStackParamList, 'Info'>;
-
-const CustomSwitch = ({label, icon, active, onToggle, primaryColor}: any) => {
-  return (
-    <TouchableOpacity
-      activeOpacity={0.8}
-      onPress={onToggle}
-      className={`flex-1 flex-row items-center p-3 rounded-xl transition-colors duration-300 ${
-        active ? 'bg-[#1A1A1A]' : `bg-[${primaryColor}]`
-      }`}>
-      <MaterialCommunityIcons
-        name={icon}
-        size={20}
-        color={active ? primaryColor : '#FFFFFF'}
-      />
-      <Text
-        className={`text-sm font-semibold ml-2 transition-colors duration-300 ${
-          active ? 'text-gray-400' : 'text-white'
-        }`}>
-        {label}
-      </Text>
-      <View
-        className={`ml-auto w-10 h-5 rounded-full transition-colors duration-300 ${
-          active ? 'bg-gray-600' : `bg-gray-600`
-        }`}
-        style={{
-          justifyContent: 'center',
-          alignItems: active ? 'flex-end' : 'flex-start',
-          paddingHorizontal: 2,
-        }}>
-        <View className="w-4 h-4 rounded-full bg-white shadow-md" />
-      </View>
-    </TouchableOpacity>
-  );
-};
 
 export default function Info({route, navigation}: Props): React.JSX.Element {
   const searchNavigation =
@@ -481,8 +288,6 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
   const {primary} = useThemeStore(state => state);
   const {addItem, removeItem} = useWatchListStore(state => state);
   const {provider} = useContentStore(state => state);
-
-  // FIX 6: Track screen focus so FlipHeader can pause/resume intelligently
   const isFocused = useIsFocused();
 
   const {
@@ -496,25 +301,21 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
     route.params.provider || provider.value,
   );
 
-  // FIX 7: Cache last valid info/meta so skeleton NEVER flashes on refetch.
-  // When hook refetches (e.g. on focus), we show cached content instead of skeleton.
+  // Cached stable data to avoid flicker
   const cachedInfo = useRef<any>(null);
   const cachedMeta = useRef<any>(null);
-
   useEffect(() => {
     if (info) cachedInfo.current = info;
   }, [info]);
-
   useEffect(() => {
     if (meta) cachedMeta.current = meta;
   }, [meta]);
 
-  // Use cached data when new data is loading (avoids skeleton flash on return)
   const stableInfo = info ?? cachedInfo.current;
   const stableMeta = meta ?? cachedMeta.current;
-  // Only show loading skeleton on TRUE first load (no cached data yet)
   const isFirstLoad = infoLoading && !cachedInfo.current;
 
+  // UI state
   const [threeDotsMenuOpen, setThreeDotsMenuOpen] = useState(false);
   const [readMore, setReadMore] = useState(false);
   const [menuPosition, setMenuPosition] = useState({top: -1000, right: 0});
@@ -531,16 +332,14 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
     settingsStorage.getBool('alwaysExternalDownloader', false),
   );
 
+  // --- Trailer state (Cinemeta → TMDB, no auto‑flip) ---
   const [ytVideoId, setYtVideoId] = useState<string | null>(null);
   const [isFetchingTrailer, setIsFetchingTrailer] = useState(false);
-
-  // FIX 8: Lift hasAutoFlipped ref to Info so it persists across FlipHeader re-renders
-  // This prevents the auto-flip animation from re-triggering when returning from Player
-  const hasAutoFlippedRef = useRef(false);
-
+  const [showTrailer, setShowTrailer] = useState(false); // new: inline player visible
+  const trailerFetchedRef = useRef(false);
   const threeDotsRef = useRef<any>();
-  const isMounted = useRef(true);
 
+  const isMounted = useRef(true);
   useEffect(() => {
     isMounted.current = true;
     return () => {
@@ -548,14 +347,61 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
     };
   }, []);
 
+  // Trailer fetching – identical priority to Info.jsx
+  useEffect(() => {
+    if (trailerFetchedRef.current) return;
+
+    const fetchTrailer = async () => {
+      // 1) Try Cinemeta / provider trailer
+      const providerTrailerRaw = stableMeta?.trailers?.[0];
+      const providerTrailerId =
+        extractYouTubeId(providerTrailerRaw?.id) ||
+        extractYouTubeId(providerTrailerRaw?.source);
+
+      if (providerTrailerId) {
+        if (isMounted.current) {
+          setYtVideoId(providerTrailerId);
+          trailerFetchedRef.current = true;
+        }
+        return;
+      }
+
+      // 2) TMDB fallback
+      if (displayTitle && !isFirstLoad) {
+        if (isMounted.current) setIsFetchingTrailer(true);
+        const videoId = await getTmdbTrailer(
+          displayTitle,
+          stableInfo?.type,
+          stableMeta?.year,
+          stableMeta?.imdbId || stableMeta?.imdb_id,
+        );
+        if (isMounted.current) {
+          setYtVideoId(videoId);
+          setIsFetchingTrailer(false);
+          trailerFetchedRef.current = true;
+        }
+      }
+    };
+
+    fetchTrailer();
+  }, [
+    stableMeta?.trailers,
+    stableMeta?.year,
+    stableMeta?.imdbId,
+    stableMeta?.imdb_id,
+    stableInfo?.type,
+    displayTitle,
+    isFirstLoad,
+  ]);
+
   const openThreeDotsMenu = useCallback(() => {
     if (threeDotsRef.current) {
       threeDotsRef.current.measure(
         (
-          x: number,
-          y: number,
-          width: number,
-          height: number,
+          _x: number,
+          _y: number,
+          _width: number,
+          _height: number,
           pageX: number,
           pageY: number,
         ) => {
@@ -597,59 +443,52 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
     setInLibrary(false);
   }, [route.params.link, removeItem]);
 
-  const synopsis = useMemo(() => {
-    return (
-      stableMeta?.description || stableInfo?.synopsis || 'No synopsis available'
-    );
-  }, [stableMeta?.description, stableInfo?.synopsis]);
-
-  const displayTitle = useMemo(() => {
-    return stableMeta?.name || stableInfo?.title;
-  }, [stableMeta?.name, stableInfo?.title]);
-
-  const posterImage = useMemo(() => {
-    return (
+  const synopsis = useMemo(
+    () =>
+      stableMeta?.description ||
+      stableInfo?.synopsis ||
+      'No synopsis available',
+    [stableMeta?.description, stableInfo?.synopsis],
+  );
+  const displayTitle = useMemo(
+    () => stableMeta?.name || stableInfo?.title,
+    [stableMeta?.name, stableInfo?.title],
+  );
+  const posterImage = useMemo(
+    () =>
       stableMeta?.poster ||
       route.params.poster ||
       stableInfo?.image ||
-      'https://placehold.jp/24/363636/ffffff/500x500.png?text=Vega'
-    );
-  }, [stableMeta?.poster, route.params.poster, stableInfo?.image]);
-
-  const backgroundImage = useMemo(() => {
-    return (
+      'https://placehold.jp/24/363636/ffffff/500x500.png?text=Vega',
+    [stableMeta?.poster, route.params.poster, stableInfo?.image],
+  );
+  const backgroundImage = useMemo(
+    () =>
       stableMeta?.background ||
       stableInfo?.image ||
-      'https://placehold.jp/24/363636/ffffff/500x500.png?text=Vega'
-    );
-  }, [stableMeta?.background, stableInfo?.image]);
-
+      'https://placehold.jp/24/363636/ffffff/500x500.png?text=Vega',
+    [stableMeta?.background, stableInfo?.image],
+  );
   const filteredLinkList = useMemo(() => {
-    if (!stableInfo?.linkList) {
-      return [];
-    }
+    if (!stableInfo?.linkList) return [];
     const excludedQualities = settingsStorage.getExcludedQualities();
     const filtered = stableInfo.linkList.filter(
       (item: any) =>
         !item.quality || !excludedQualities.includes(item.quality as string),
     );
-
     const uniqueLinksMap = new Map();
     filtered.forEach((item: any) => {
       if (item.link && !uniqueLinksMap.has(item.link)) {
         uniqueLinksMap.set(item.link, item);
       }
     });
-
-    const filteredAndUnique = Array.from(uniqueLinksMap.values());
-    return filteredAndUnique.length > 0
-      ? filteredAndUnique
-      : stableInfo.linkList;
+    const result = Array.from(uniqueLinksMap.values());
+    return result.length > 0 ? result : stableInfo.linkList;
   }, [stableInfo?.linkList]);
-
-  const castList = useMemo(() => {
-    return stableMeta?.cast?.length! > 0 ? stableMeta?.cast : stableInfo?.cast;
-  }, [stableMeta?.cast, stableInfo?.cast]);
+  const castList = useMemo(
+    () => (stableMeta?.cast?.length ? stableMeta?.cast : stableInfo?.cast),
+    [stableMeta?.cast, stableInfo?.cast],
+  );
 
   const handleRefresh = useCallback(async () => {
     try {
@@ -662,7 +501,7 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
     } catch (refreshError) {
       console.error('Error refreshing content:', refreshError);
     }
-  }, [refetch]);
+  }, [refetch, route.params.link]);
 
   const handleToggleExternalPlayer = useCallback(() => {
     const newState = !useExternalPlayer;
@@ -676,109 +515,28 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
     settingsStorage.setBool('alwaysExternalDownloader', newState);
   }, [useExternalDownloader]);
 
-  // --- TRAILER FETCHING LOGIC ---
-  // FIX 9: Guard with a fetched ref so trailer is NOT re-fetched every time
-  // screen regains focus (which was causing ytVideoId to reset and YouTube to rebuffer)
-  const trailerFetchedRef = useRef(false);
+  const handlePlayTrailer = useCallback(() => {
+    if (ytVideoId) {
+      setShowTrailer(true);
+    }
+  }, [ytVideoId]);
 
-  useEffect(() => {
-    // Skip if already fetched once — prevents re-fetch on return from Player
-    if (trailerFetchedRef.current) return;
-
-    const fetchTrailer = async () => {
-      const providerTrailer = stableMeta?.trailers?.[0]?.source;
-
-      if (providerTrailer) {
-        if (isMounted.current) {
-          setYtVideoId(providerTrailer);
-          trailerFetchedRef.current = true;
-        }
-        return;
-      }
-
-      if (displayTitle && !isFirstLoad) {
-        if (isMounted.current) {
-          setIsFetchingTrailer(true);
-        }
-
-        const videoId = await getTmdbTrailer(
-          displayTitle,
-          stableInfo?.type,
-          stableMeta?.year,
-          stableMeta?.imdbId || stableMeta?.imdb_id,
-        );
-
-        if (isMounted.current) {
-          setYtVideoId(videoId);
-          setIsFetchingTrailer(false);
-          trailerFetchedRef.current = true;
-        }
-      }
-    };
-
-    fetchTrailer();
-  }, [
-    displayTitle,
-    stableMeta?.year,
-    stableMeta?.trailers,
-    stableMeta?.imdbId,
-    stableMeta?.imdb_id,
-    isFirstLoad,
-    stableInfo?.type,
-  ]);
-
-  if (error && !cachedInfo.current) {
-    // Only show error screen on first-load failure; on refetch fail, keep showing cached content
-    return (
-      <View className="h-full w-full bg-black justify-center items-center p-4">
-        <StatusBar
-          showHideTransition={'slide'}
-          animated={true}
-          translucent={true}
-          backgroundColor="black"
-        />
-        <Text className="text-red-400 text-lg font-bold mb-4 text-center">
-          Failed to load content
-        </Text>
-        <Text className="text-gray-400 text-sm mb-6 text-center">
-          {error.message ||
-            'An unexpected error occurred while loading the content'}
-        </Text>
-        <TouchableOpacity
-          onPress={handleRefresh}
-          className="bg-red-600 px-6 py-3 rounded-lg mb-4">
-          <Text className="text-white font-semibold">Try Again</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          className="bg-gray-600 px-6 py-3 rounded-lg">
-          <Text className="text-white font-semibold">Go Back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // FIX 10: Memoize the entire rendered content.
-  // This is the CORE fix — without this, every re-render (including isFocused toggle)
-  // causes renderContent() to return a fresh JSX tree, making FlatList rebuild
-  // FlipHeader from scratch and rebuffer the YouTube WebView.
+  // Memoized header content (no FlipHeader)
   const memoizedHeaderContent = useMemo(() => {
-    // Show skeleton only on TRUE first load (no cached data)
     if (isFirstLoad || !stableInfo) {
       return (
         <View>
-          <FlipHeader
+          <HeroHeader
             posterImage={backgroundImage}
             trailerId={null}
-            title={displayTitle}
             meta={stableMeta}
             infoLoading={true}
             setLogoError={setLogoError}
             displayTitle={displayTitle}
             logoError={logoError}
-            isFetchingTrailer={false}
             isFocused={isFocused}
-            hasAutoFlippedRef={hasAutoFlippedRef}
+            showTrailer={false}
+            onCloseTrailer={() => setShowTrailer(false)}
           />
           <View className="gap-y-3 items-start mb-4 p-3 bg-black">
             <Skeleton show={true} colorMode="dark" height={30} width={80} />
@@ -790,7 +548,7 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
                   show={true}
                   colorMode="dark"
                   height={20}
-                  width={'100%'}
+                  width="100%"
                 />
               </View>
             ))}
@@ -817,21 +575,21 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
 
     return (
       <View>
-        <FlipHeader
+        <HeroHeader
           posterImage={backgroundImage}
           trailerId={ytVideoId}
-          title={displayTitle}
           meta={stableMeta}
           infoLoading={false}
           setLogoError={setLogoError}
           displayTitle={displayTitle}
           logoError={logoError}
-          isFetchingTrailer={isFetchingTrailer}
           isFocused={isFocused}
-          hasAutoFlippedRef={hasAutoFlippedRef}
+          showTrailer={showTrailer}
+          onCloseTrailer={() => setShowTrailer(false)}
         />
 
         <View className="p-4 bg-black">
+          {/* Metadata pills */}
           <View className="flex-row gap-x-3 gap-y-1 flex-wrap items-center mb-4">
             {stableMeta?.year && (
               <Text className="text-white text-lg bg-tertiary px-2 rounded-md">
@@ -858,6 +616,7 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
               </Text>
             ))}
           </View>
+
           {stableMeta?.awards && (
             <View className="mb-2 w-full flex-row items-baseline gap-2">
               <Text className="text-white text-sm font-semibold">Awards:</Text>
@@ -869,7 +628,6 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
             </View>
           )}
 
-          {/* --- CAST INFO COMPONENT --- */}
           {displayTitle && (
             <CastInfo
               title={displayTitle}
@@ -880,6 +638,7 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
             />
           )}
 
+          {/* Synopsis row + Trailer button + others */}
           <View className="mb-2 w-full flex-row items-center justify-between">
             <View className="flex-row items-center gap-2">
               <Text className="text-white text-lg font-semibold">Synopsis</Text>
@@ -888,6 +647,7 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
               </Text>
             </View>
             <View className="flex-row items-center gap-4 mb-1">
+              {/* Trailer button – now triggers inline overlay */}
               {isFetchingTrailer ? (
                 <View className="p-2 rounded-full bg-slate-800">
                   <MaterialCommunityIcons
@@ -898,11 +658,7 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
                 </View>
               ) : ytVideoId ? (
                 <TouchableOpacity
-                  onPress={() => {
-                    navigation.navigate('WatchTrailer', {
-                      videoId: ytVideoId,
-                    });
-                  }}
+                  onPress={handlePlayTrailer}
                   className="p-2 rounded-full bg-slate-800">
                   <MaterialCommunityIcons
                     name="movie-open"
@@ -911,6 +667,7 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
                   />
                 </TouchableOpacity>
               ) : null}
+
               {inLibrary ? (
                 <Ionicons
                   name="bookmark"
@@ -935,67 +692,57 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
                   color="rgb(156 163 175)"
                 />
               </TouchableOpacity>
-              {
-                <Modal
-                  animationType="none"
-                  transparent={true}
-                  visible={threeDotsMenuOpen}
-                  onRequestClose={() => {
-                    setThreeDotsMenuOpen(false);
-                  }}>
-                  <Pressable
-                    onPress={() => setThreeDotsMenuOpen(false)}
-                    className="flex-1 bg-opacity-50">
-                    <View
-                      className="rounded-md p-2 w-48 bg-quaternary absolute right-10 top-[330px]"
-                      style={{
-                        top: menuPosition.top,
-                        right: menuPosition.right,
+
+              {/* Three‑dots menu modal */}
+              <Modal
+                animationType="none"
+                transparent={true}
+                visible={threeDotsMenuOpen}
+                onRequestClose={() => setThreeDotsMenuOpen(false)}>
+                <Pressable
+                  onPress={() => setThreeDotsMenuOpen(false)}
+                  className="flex-1 bg-opacity-50">
+                  <View
+                    className="rounded-md p-2 w-48 bg-quaternary absolute"
+                    style={{top: menuPosition.top, right: menuPosition.right}}>
+                    <TouchableOpacity
+                      className="flex-row items-center gap-2"
+                      onPress={async () => {
+                        setThreeDotsMenuOpen(false);
+                        navigation.navigate('Webview', {
+                          link: route.params.link,
+                        });
                       }}>
-                      <TouchableOpacity
-                        className="flex-row items-center gap-2"
-                        onPress={async () => {
-                          setThreeDotsMenuOpen(false);
-                          navigation.navigate('Webview', {
-                            link: route.params.link,
-                          });
-                        }}>
-                        <MaterialCommunityIcons
-                          name="web"
-                          size={21}
-                          color="rgb(156 163 175)"
-                        />
-                        <Text className="text-white text-base">
-                          Open in Web
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        className="flex-row items-center gap-2 mt-1"
-                        onPress={async () => {
-                          setThreeDotsMenuOpen(false);
-                          //@ts-ignore
-                          searchNavigation.navigate('SearchStack', {
-                            screen: 'SearchResults',
-                            params: {
-                              filter: displayTitle,
-                            },
-                          });
-                        }}>
-                        <Ionicons
-                          name="search"
-                          size={21}
-                          color="rgb(156 163 175)"
-                        />
-                        <Text className="text-white text-base">
-                          Search Title
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </Pressable>
-                </Modal>
-              }
+                      <MaterialCommunityIcons
+                        name="web"
+                        size={21}
+                        color="rgb(156 163 175)"
+                      />
+                      <Text className="text-white text-base">Open in Web</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      className="flex-row items-center gap-2 mt-1"
+                      onPress={async () => {
+                        setThreeDotsMenuOpen(false);
+                        //@ts-ignore
+                        searchNavigation.navigate('SearchStack', {
+                          screen: 'SearchResults',
+                          params: {filter: displayTitle},
+                        });
+                      }}>
+                      <Ionicons
+                        name="search"
+                        size={21}
+                        color="rgb(156 163 175)"
+                      />
+                      <Text className="text-white text-base">Search Title</Text>
+                    </TouchableOpacity>
+                  </View>
+                </Pressable>
+              </Modal>
             </View>
           </View>
+
           <Text className="text-gray-200 text-sm px-2 py-1 bg-tertiary rounded-md">
             {synopsis.length > 180 && !readMore
               ? synopsis.slice(0, 180) + '... '
@@ -1020,7 +767,6 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
               onToggle={handleToggleExternalPlayer}
               primaryColor={primary}
             />
-
             <CustomSwitch
               label="External Down"
               icon="download-circle-outline"
@@ -1035,9 +781,6 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
       </View>
     );
   }, [
-    // FIX 11: Comprehensive, correct dependency list.
-    // When returning from Player, none of these change → memoized element is reused →
-    // FlipHeader keeps its internal state → YouTube WebView is NOT rebuilt → no buffering.
     isFirstLoad,
     stableInfo,
     stableMeta,
@@ -1060,7 +803,8 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
     primary,
     route.params,
     provider.value,
-    hasAutoFlippedRef,
+    showTrailer, // added dependency
+    handlePlayTrailer, // added
     navigation,
     searchNavigation,
     addLibrary,
@@ -1073,13 +817,44 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
     setThreeDotsMenuOpen,
   ]);
 
+  // Error state (only if no cached data)
+  if (error && !cachedInfo.current) {
+    return (
+      <View className="h-full w-full bg-black justify-center items-center p-4">
+        <StatusBar
+          showHideTransition="slide"
+          animated
+          translucent
+          backgroundColor="black"
+        />
+        <Text className="text-red-400 text-lg font-bold mb-4 text-center">
+          Failed to load content
+        </Text>
+        <Text className="text-gray-400 text-sm mb-6 text-center">
+          {error.message ||
+            'An unexpected error occurred while loading the content'}
+        </Text>
+        <TouchableOpacity
+          onPress={handleRefresh}
+          className="bg-red-600 px-6 py-3 rounded-lg mb-4">
+          <Text className="text-white font-semibold">Try Again</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          className="bg-gray-600 px-6 py-3 rounded-lg">
+          <Text className="text-white font-semibold">Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <QueryErrorBoundary>
       <View className="h-full w-full">
         <StatusBar
-          showHideTransition={'slide'}
-          animated={true}
-          translucent={true}
+          showHideTransition="slide"
+          animated
+          translucent
           backgroundColor={backgroundColor}
         />
         <View>
@@ -1097,7 +872,7 @@ export default function Info({route, navigation}: Props): React.JSX.Element {
               <RefreshControl
                 colors={[primary]}
                 tintColor={primary}
-                progressBackgroundColor={'black'}
+                progressBackgroundColor="black"
                 refreshing={false}
                 onRefresh={handleRefresh}
               />
