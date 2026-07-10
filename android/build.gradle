@@ -14,7 +14,7 @@ buildscript {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://jitpack.io' }   // ✅ Fixed URL (no www)
+        maven { url 'https://jitpack.io' }   // ✅ Fixed JitPack URL
     }
 
     dependencies {
@@ -31,7 +31,7 @@ allprojects {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://jitpack.io' }   // ✅ Fixed URL (no www)
+        maven { url 'https://jitpack.io' }   // ✅ Fixed JitPack URL
 
         // React Native Android binaries
         maven {
@@ -47,14 +47,15 @@ allprojects {
 
 // Optional: Force certain versions to avoid conflicts
 subprojects {
-    project.configurations.all {
+    // ✅ Fixed: Direct configurations access to comply with strict Gradle 8+ isolated projects
+    configurations.all {
         resolutionStrategy.eachDependency { details ->
             // Enforce React Native version harmony
             if (details.requested.group == 'com.facebook.react' && details.requested.name.contains('react-native')) {
                 details.useVersion "0.81.5"   // Matches your RN version
             }
             
-            // ✅ Fix: Force uniform OkHttp version to eliminate "NoClassDefFoundError: Lokhttp3/internal/Util" crash
+            // Fix: Force uniform OkHttp version to eliminate "NoClassDefFoundError: Lokhttp3/internal/Util" crash
             if (details.requested.group == 'com.squareup.okhttp3') {
                 details.useVersion "4.12.0"
             }

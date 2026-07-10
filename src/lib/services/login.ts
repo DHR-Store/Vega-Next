@@ -16,7 +16,7 @@ import useWatchListStore from '../zustand/watchListStore';
 import {watchHistoryStorage} from '../storage/WatchHistoryStorage';
 import {watchListStorage} from '../storage/WatchListStorage';
 
-const SUPABASE_URL = 'https://YOUR_SUPABASE_URL.supabase.co';
+const SUPABASE_URL = 'YOUR SUPABASE URL';
 const SUPABASE_ANON_KEY =
   'YOUR_SUPABASE_ANON_KEY';
 

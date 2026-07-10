@@ -1,31 +1,30 @@
-import {StyleSheet} from 'react-native';
+import {StyleSheet, View} from 'react-native';
 import React from 'react';
-import {BlurView} from 'expo-blur';
 import LinearGradient from 'react-native-linear-gradient';
 
 const TabBarBackgound = () => {
   return (
-    <>
-      <BlurView
-        style={StyleSheet.absoluteFill}
-        experimentalBlurMethod="dimezisBlurView"
-        intensity={30}
-        blurReductionFactor={3}
-        tint="dark"
+    <View style={StyleSheet.absoluteFill}>
+      {/* 🟢 REPLACE BlurView with a high-performance semi-transparent background color overlay */}
+      <View
+        style={[
+          StyleSheet.absoluteFill,
+          {backgroundColor: 'rgba(15, 15, 15, 0.85)'}, // Smooth dark backing
+        ]}
       />
       <LinearGradient
         colors={[
           'rgba(0, 0, 0, 0.0)',
           'rgba(0, 0, 0, 0.3)',
-          'rgba(0, 0, 0, 0.5)',
-          'rgba(0, 0, 0, 0.8)',
+          'rgba(0, 0, 0, 0.6)',
+          'rgba(0, 0, 0, 0.9)',
           'rgba(0, 0, 0, 1)',
         ]}
         style={StyleSheet.absoluteFill}
         start={{x: 0, y: 0}}
         end={{x: 0, y: 1}}
       />
-    </>
+    </View>
   );
 };
 

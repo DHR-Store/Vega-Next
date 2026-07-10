@@ -21,7 +21,7 @@ export class ExtensionManager {
     'https://raw.githubusercontent.com/DHR-Store/vega-provider/refs/heads/main';
 
   // --- ADDED: Your Fine-grained GitHub PAT ---
-  private githubToken = 'YOUR_GITHUB_PAT';
+  private githubToken = 'YOUR GITHUB PERSONAL ACCESS TOKEN';
 
   private testMode = false;
   private baseUrlTestMode = '';

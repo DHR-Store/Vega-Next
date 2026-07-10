@@ -4,7 +4,7 @@ import {Skeleton} from 'moti/skeleton';
 import {MaterialCommunityIcons} from '@expo/vector-icons';
 import {useNavigation} from '@react-navigation/native';
 
-const TMDB_API_KEY = 'YOUR_TMDB_API';
+const TMDB_API_KEY = 'YOUR TMDB API KEY';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w185';
 

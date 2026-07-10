@@ -32,6 +32,10 @@ type Props = {
   onPressSubs: (item: any) => void;
 };
 
+// Optimization: Pre-allocate static array to prevent recreation lags on mount
+const SKELETONS = [1, 2, 3, 4];
+const WINDOW_WIDTH = Dimensions.get('window').width;
+
 const DownloadBottomSheet = ({
   data,
   loading,
@@ -55,16 +59,20 @@ const DownloadBottomSheet = ({
     }, []);
   }, [data]);
 
+  // Instantly trigger sheet expansion without frame lag
   useEffect(() => {
-    if (showModal) bottomSheetRef.current?.expand();
-    else bottomSheetRef.current?.close();
+    if (showModal) {
+      bottomSheetRef.current?.expand();
+    } else {
+      bottomSheetRef.current?.close();
+    }
   }, [showModal]);
 
-  // FIX: Properly handle backdrop touches using Gorhom's native component
   const renderBackdrop = useCallback(
     (props: any) => (
       <BottomSheetBackdrop
         {...props}
+        opacity={0.5}
         disappearsOnIndex={-1}
         appearsOnIndex={0}
         pressBehavior="close"
@@ -74,10 +82,7 @@ const DownloadBottomSheet = ({
   );
 
   const handlePressVideo = (item: Stream) => {
-    // 1. Let the BottomSheet animate closed cleanly FIRST
     bottomSheetRef.current?.close();
-
-    // 2. Defer the heavy download trigger so Reanimated animations don't crash
     setTimeout(async () => {
       const useExternal = settingsStorage.getBool(
         'alwaysExternalDownloader',
@@ -92,7 +97,7 @@ const DownloadBottomSheet = ({
       } else {
         onPressVideo(item);
       }
-    }, 300); // Wait 300ms for exit animation
+    }, 300);
   };
 
   const handlePressSubs = (item: {
@@ -101,7 +106,6 @@ const DownloadBottomSheet = ({
     title: string;
   }) => {
     bottomSheetRef.current?.close();
-
     setTimeout(async () => {
       const useExternal = settingsStorage.getBool(
         'alwaysExternalDownloader',
@@ -116,7 +120,7 @@ const DownloadBottomSheet = ({
       } else {
         onPressSubs(item);
       }
-    }, 300); // Wait 300ms for exit animation
+    }, 300);
   };
 
   return (
@@ -124,24 +128,23 @@ const DownloadBottomSheet = ({
       onRequestClose={() => bottomSheetRef.current?.close()}
       visible={showModal}
       transparent={true}
-      animationType="fade" // Prevents harsh unmounting visual glitches
-    >
+      animationType="none" // FIX: Removed "fade" to prevent layout block delays
+      statusBarTranslucent={true}>
       <GestureHandlerRootView style={StyleSheet.absoluteFillObject}>
-        {/* FIX: Removed the buggy <Pressable> wrapper and added backdropComponent */}
         <BottomSheet
           enablePanDownToClose
           snapPoints={['30%', 450]}
-          containerStyle={{marginHorizontal: 5}}
+          containerStyle={styles.container}
           ref={bottomSheetRef}
-          backgroundStyle={{backgroundColor: '#1a1a1a'}}
-          handleIndicatorStyle={{backgroundColor: '#333'}}
+          backgroundStyle={styles.background}
+          handleIndicatorStyle={styles.indicator}
           backdropComponent={renderBackdrop}
           onClose={() => setModal(false)}>
           <Text className="text-white text-xl p-1 font-semibold text-center">
             {title}
           </Text>
           <BottomSheetScrollView
-            style={{padding: 5, marginBottom: 5}}
+            style={styles.scrollView}
             showsVerticalScrollIndicator={false}>
             {parsedSubtitles.length > 0 && (
               <View className="flex-row items-center justify-center gap-x-3 w-full my-5">
@@ -170,10 +173,10 @@ const DownloadBottomSheet = ({
               </View>
             )}
             {loading
-              ? Array.from({length: 4}).map((_, index) => (
+              ? SKELETONS.map((_, index) => (
                   <SkeletonLoader
                     key={index}
-                    width={Dimensions.get('window').width - 30}
+                    width={WINDOW_WIDTH - 30}
                     height={35}
                     marginVertical={5}
                   />
@@ -238,5 +241,21 @@ const DownloadBottomSheet = ({
     </Modal>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    marginHorizontal: 5,
+  },
+  background: {
+    backgroundColor: '#1a1a1a',
+  },
+  indicator: {
+    backgroundColor: '#333',
+  },
+  scrollView: {
+    padding: 5,
+    marginBottom: 5,
+  },
+});
 
 export default DownloadBottomSheet;

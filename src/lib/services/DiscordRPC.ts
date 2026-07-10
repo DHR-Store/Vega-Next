@@ -6,10 +6,10 @@ class DiscordRPCService {
   private isIdentified: boolean = false;
 
   private reconnectTimeout: any = null;
-  private readonly APP_ID = 'YOUR_APP_ID';
+  private readonly APP_ID = '';
   
   // 🔴 Your Webhook URL
-  private readonly WEBHOOK_URL = 'https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN';
+  private readonly WEBHOOK_URL = 'YOUR WEBHOOK URL';
 
   private pendingPresence: {
     title: string;

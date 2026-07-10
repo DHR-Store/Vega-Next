@@ -9,14 +9,14 @@ import {
   TextInput,
   DeviceEventEmitter,
 } from 'react-native';
-import React, {useState, useEffect} from 'react'; // FIXED: Added useEffect
+import React, {useState, useEffect} from 'react';
 import {MMKV} from '../../lib/Mmkv';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useThemeStore from '../../lib/zustand/themeStore';
 import {Dropdown} from 'react-native-element-dropdown';
 import {themes} from '../../lib/constants';
-import {extensionManager} from '../../lib/services/ExtensionManager'; // FIXED: Imported Extension Manager
+import {extensionManager} from '../../lib/services/ExtensionManager';
 
 // --- Constants for New Features ---
 const dnsProviders = [
@@ -53,17 +53,25 @@ const userAgents = [
   {name: 'Custom', value: 'custom'},
 ];
 
+// Helper to prevent "false" string vs false boolean bugs from MMKV
+const safeGetBool = (key: string, defaultValue: boolean) => {
+  const val = MMKV.getBool(key);
+  if (val === 'false' || val === false) return false;
+  if (val === 'true' || val === true) return true;
+  return defaultValue;
+};
+
 const Preferences = () => {
   const {primary, setPrimary, isCustom, setCustom} = useThemeStore(
     state => state,
   );
 
-  // Existing States
+  // Existing States initialized safely
   const [showRecentlyWatched, setShowRecentlyWatched] = useState(
-    MMKV.getBool('showRecentlyWatched') || false,
+    safeGetBool('showRecentlyWatched', true),
   );
   const [disableDrawer, setDisableDrawer] = useState(
-    MMKV.getBool('disableDrawer') || false,
+    safeGetBool('disableDrawer', false),
   );
   const [ExcludedQualities, setExcludedQualities] = useState(
     MMKV.getArray('ExcludedQualities') || [],
@@ -72,46 +80,61 @@ const Preferences = () => {
     MMKV.getString('customColor') || '#FF6347',
   );
   const [showMediaControls, setShowMediaControls] = useState<boolean>(
-    MMKV.getBool('showMediaControls') === false ? false : true,
+    safeGetBool('showMediaControls', true),
   );
   const [showHamburgerMenu, setShowHamburgerMenu] = useState<boolean>(
-    MMKV.getBool('showHamburgerMenu') === false ? false : true,
+    safeGetBool('showHamburgerMenu', true),
   );
   const [hideSeekButtons, setHideSeekButtons] = useState<boolean>(
-    MMKV.getBool('hideSeekButtons') || false,
+    safeGetBool('hideSeekButtons', false),
   );
   const [enableSwipeGesture, setEnableSwipeGesture] = useState<boolean>(
-    MMKV.getBool('enableSwipeGesture') === false ? false : true,
+    safeGetBool('enableSwipeGesture', true),
   );
   const [showTabBarLables, setShowTabBarLables] = useState<boolean>(
-    MMKV.getBool('showTabBarLables') || false,
+    safeGetBool('showTabBarLables', false),
   );
   const [OpenExternalPlayer, setOpenExternalPlayer] = useState(
-    MMKV.getBool('useExternalPlayer') || false,
+    safeGetBool('useExternalPlayer', false),
   );
   const [hapticFeedback, setHapticFeedback] = useState(
-    MMKV.getBool('hapticFeedback') === false ? false : true,
+    safeGetBool('hapticFeedback', false),
   );
   const [alwaysUseExternalDownload, setAlwaysUseExternalDownload] = useState(
-    MMKV.getBool('alwaysExternalDownloader') || false,
+    safeGetBool('alwaysExternalDownloader', false),
   );
 
   // New States for DNS and User Agent
   const [dnsUrl, setDnsUrl] = useState(MMKV.getString('dnsUrl') || '');
   const [userAgent, setUserAgent] = useState(MMKV.getString('userAgent') || '');
 
-  // FIXED: Added missing Developer States
+  // Developer States
   const [developerMode, setDeveloperMode] = useState<boolean>(
-    MMKV.getBool('developerMode') || false,
+    safeGetBool('developerMode', false),
   );
   const [testBaseUrl, setTestBaseUrl] = useState<string>(
     MMKV.getString('testBaseUrl') || 'http://10.0.2.2:3000',
   );
 
-  // FIXED: Sync data values to Extension Manager initialization loop
+  const [autoPip, setAutoPip] = useState<boolean>(false);
+
+  // FIXED: Reusable function to dynamically check preference before vibrating
+  const triggerHaptic = () => {
+    if (hapticFeedback) {
+      RNReactNativeHapticFeedback.trigger('effectTick');
+    }
+  };
+
+  // Sync data values to Extension Manager initialization loop
   useEffect(() => {
     extensionManager.setTestMode(developerMode);
     extensionManager.setBaseUrlTestMode(testBaseUrl);
+  }, [developerMode, testBaseUrl]);
+
+  useEffect(() => {
+    // Retrieve saved value on mount (defaults to false if not set)
+    const savedAutoPip = MMKV.getBool ? MMKV.getBool('AutoPip') : false;
+    setAutoPip(!!savedAutoPip);
   }, []);
 
   return (
@@ -155,12 +178,14 @@ const Preferences = () => {
                           );
                           return;
                         }
+                        triggerHaptic();
                         MMKV.setString('customColor', e.nativeEvent.text);
                         setPrimary(e.nativeEvent.text);
                       }}
                     />
                     <TouchableOpacity
                       onPress={() => {
+                        triggerHaptic();
                         setCustom(false);
                         setPrimary('#FF6347');
                       }}>
@@ -201,6 +226,7 @@ const Preferences = () => {
                     data={themes}
                     value={primary}
                     onChange={value => {
+                      triggerHaptic();
                       if (value.name === 'Custom') {
                         setCustom(true);
                         setPrimary(customColor);
@@ -213,15 +239,28 @@ const Preferences = () => {
               </View>
             </View>
 
-            {/* Haptic Feedback */}
+            {/* Haptic Feedback Switch */}
             <View className="flex-row items-center justify-between p-4 border-b border-[#262626]">
               <Text className="text-white text-base">Haptic Feedback</Text>
               <Switch
                 thumbColor={hapticFeedback ? primary : 'gray'}
                 value={hapticFeedback}
                 onValueChange={() => {
-                  MMKV.setBool('hapticFeedback', !hapticFeedback);
-                  setHapticFeedback(!hapticFeedback);
+                  // Vibrate before disabling if it was on, or vibrate upon turning back on
+                  if (hapticFeedback) {
+                    RNReactNativeHapticFeedback.trigger('effectTick');
+                  }
+                  const nextVal = !hapticFeedback;
+                  MMKV.setBool('hapticFeedback', nextVal);
+                  setHapticFeedback(nextVal);
+
+                  // If it's freshly turned on, trigger feedback acknowledgment
+                  if (nextVal) {
+                    setTimeout(
+                      () => RNReactNativeHapticFeedback.trigger('effectTick'),
+                      50,
+                    );
+                  }
                 }}
               />
             </View>
@@ -233,14 +272,11 @@ const Preferences = () => {
                 thumbColor={showTabBarLables ? primary : 'gray'}
                 value={showTabBarLables}
                 onValueChange={() => {
+                  triggerHaptic();
                   const newVal = !showTabBarLables;
                   MMKV.setBool('showTabBarLables', newVal);
                   setShowTabBarLables(newVal);
-
-                  // Emit event for instant update
                   DeviceEventEmitter.emit('changeTabBarLabel', newVal);
-
-                  // Show toast as requested
                   ToastAndroid.show(
                     'Restart App to Apply Changes',
                     ToastAndroid.SHORT,
@@ -256,6 +292,7 @@ const Preferences = () => {
                 thumbColor={showHamburgerMenu ? primary : 'gray'}
                 value={showHamburgerMenu}
                 onValueChange={() => {
+                  triggerHaptic();
                   MMKV.setBool('showHamburgerMenu', !showHamburgerMenu);
                   setShowHamburgerMenu(!showHamburgerMenu);
                 }}
@@ -271,8 +308,11 @@ const Preferences = () => {
                 thumbColor={showRecentlyWatched ? primary : 'gray'}
                 value={showRecentlyWatched}
                 onValueChange={() => {
-                  MMKV.setBool('showRecentlyWatched', !showRecentlyWatched);
-                  setShowRecentlyWatched(!showRecentlyWatched);
+                  triggerHaptic();
+                  const newVal = !showRecentlyWatched;
+                  MMKV.setBool('showRecentlyWatched', newVal);
+                  setShowRecentlyWatched(newVal);
+                  DeviceEventEmitter.emit('changeRecentlyWatched', newVal);
                 }}
               />
             </View>
@@ -284,6 +324,7 @@ const Preferences = () => {
                 thumbColor={disableDrawer ? primary : 'gray'}
                 value={disableDrawer}
                 onValueChange={() => {
+                  triggerHaptic();
                   MMKV.setBool('disableDrawer', !disableDrawer);
                   setDisableDrawer(!disableDrawer);
                 }}
@@ -299,6 +340,7 @@ const Preferences = () => {
                 thumbColor={alwaysUseExternalDownload ? primary : 'gray'}
                 value={alwaysUseExternalDownload}
                 onValueChange={() => {
+                  triggerHaptic();
                   MMKV.setBool(
                     'alwaysExternalDownloader',
                     !alwaysUseExternalDownload,
@@ -307,6 +349,35 @@ const Preferences = () => {
                 }}
               />
             </View>
+          </View>
+        </View>
+
+        {/* Picture in Picture Settings */}
+        <View className="mb-6">
+          <Text className="text-gray-400 text-sm mb-3">Player Settings</Text>
+          <View className="bg-[#1A1A1A] rounded-xl p-4 flex-row justify-between items-center">
+            <View className="flex-1 pr-4">
+              <Text className="text-white text-base mb-1">
+                Auto Picture-in-Picture
+              </Text>
+              <Text className="text-gray-400 text-xs">
+                Automatically switch to PiP mode when home button is pressed.
+              </Text>
+            </View>
+            <Switch
+              value={autoPip}
+              onValueChange={value => {
+                if (typeof triggerHaptic === 'function') triggerHaptic();
+                setAutoPip(value);
+                if (MMKV.setBool) {
+                  MMKV.setBool('AutoPip', value);
+                } else if (MMKV.set) {
+                  MMKV.set('AutoPip', value);
+                }
+              }}
+              trackColor={{false: '#262626', true: primary}}
+              thumbColor={autoPip ? '#white' : '#f4f3f4'}
+            />
           </View>
         </View>
 
@@ -353,6 +424,7 @@ const Preferences = () => {
                   dnsProviders.some(p => p.value === dnsUrl) ? dnsUrl : 'custom'
                 }
                 onChange={item => {
+                  triggerHaptic();
                   if (item.value !== 'custom') {
                     MMKV.setString('dnsUrl', item.value);
                     setDnsUrl(item.value);
@@ -379,6 +451,7 @@ const Preferences = () => {
                     placeholderTextColor="gray"
                     defaultValue={dnsUrl}
                     onSubmitEditing={e => {
+                      triggerHaptic();
                       MMKV.setString('dnsUrl', e.nativeEvent.text);
                       setDnsUrl(e.nativeEvent.text);
                       ToastAndroid.show('Custom DNS Saved', ToastAndroid.SHORT);
@@ -428,6 +501,7 @@ const Preferences = () => {
                     : 'custom'
                 }
                 onChange={item => {
+                  triggerHaptic();
                   if (item.value !== 'custom') {
                     MMKV.setString('userAgent', item.value);
                     setUserAgent(item.value);
@@ -457,6 +531,7 @@ const Preferences = () => {
                   placeholderTextColor="gray"
                   defaultValue={userAgent}
                   onSubmitEditing={e => {
+                    triggerHaptic();
                     MMKV.setString('userAgent', e.nativeEvent.text);
                     setUserAgent(e.nativeEvent.text);
                     ToastAndroid.show('Custom UA Saved', ToastAndroid.SHORT);
@@ -480,6 +555,7 @@ const Preferences = () => {
                 thumbColor={OpenExternalPlayer ? primary : 'gray'}
                 value={OpenExternalPlayer}
                 onValueChange={val => {
+                  triggerHaptic();
                   MMKV.setBool('useExternalPlayer', val);
                   setOpenExternalPlayer(val);
                 }}
@@ -493,6 +569,7 @@ const Preferences = () => {
                 thumbColor={showMediaControls ? primary : 'gray'}
                 value={showMediaControls}
                 onValueChange={() => {
+                  triggerHaptic();
                   MMKV.setBool('showMediaControls', !showMediaControls);
                   setShowMediaControls(!showMediaControls);
                 }}
@@ -506,6 +583,7 @@ const Preferences = () => {
                 thumbColor={hideSeekButtons ? primary : 'gray'}
                 value={hideSeekButtons}
                 onValueChange={() => {
+                  triggerHaptic();
                   MMKV.setBool('hideSeekButtons', !hideSeekButtons);
                   setHideSeekButtons(!hideSeekButtons);
                 }}
@@ -521,6 +599,7 @@ const Preferences = () => {
                 thumbColor={enableSwipeGesture ? primary : 'gray'}
                 value={enableSwipeGesture}
                 onValueChange={() => {
+                  triggerHaptic();
                   MMKV.setBool('enableSwipeGesture', !enableSwipeGesture);
                   setEnableSwipeGesture(!enableSwipeGesture);
                 }}
@@ -529,7 +608,7 @@ const Preferences = () => {
           </View>
         </View>
 
-        {/* --- FIXED: Added Missing Developer Options Section --- */}
+        {/* Developer Settings */}
         <View className="mb-6">
           <Text className="text-gray-400 text-sm mb-3">Developer</Text>
           <View className="bg-[#1A1A1A] rounded-xl overflow-hidden p-4">
@@ -541,6 +620,7 @@ const Preferences = () => {
                 thumbColor={developerMode ? primary : 'gray'}
                 value={developerMode}
                 onValueChange={val => {
+                  triggerHaptic();
                   MMKV.setBool('developerMode', val);
                   setDeveloperMode(val);
                   extensionManager.setTestMode(val);
@@ -570,6 +650,7 @@ const Preferences = () => {
                   placeholderTextColor="gray"
                   defaultValue={testBaseUrl}
                   onSubmitEditing={e => {
+                    triggerHaptic();
                     const newUrl = e.nativeEvent.text;
                     MMKV.setString('testBaseUrl', newUrl);
                     setTestBaseUrl(newUrl);
@@ -577,11 +658,6 @@ const Preferences = () => {
                     ToastAndroid.show('Test URL Saved', ToastAndroid.SHORT);
                   }}
                 />
-                <Text className="text-gray-500 text-xs mt-2 ml-1">
-                  URL pointing to your local provider build (use your laptop's
-                  USB tethering IP address, for example:
-                  http://192.168.42.129:3000).
-                </Text>
               </View>
             )}
           </View>
@@ -599,9 +675,7 @@ const Preferences = () => {
                 <TouchableOpacity
                   key={index}
                   onPress={() => {
-                    if (MMKV.getBool('hapticFeedback') !== false) {
-                      RNReactNativeHapticFeedback.trigger('effectTick');
-                    }
+                    triggerHaptic();
                     const newExcluded = ExcludedQualities.includes(quality)
                       ? ExcludedQualities.filter(q => q !== quality)
                       : [...ExcludedQualities, quality];

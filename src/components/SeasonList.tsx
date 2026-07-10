@@ -8,7 +8,6 @@ import {
   FlatList,
   ActivityIndicator,
   Pressable,
-  ScrollView,
   TextInput,
   Animated,
   Easing,
@@ -23,10 +22,6 @@ import {MotiView} from 'moti';
 import {Skeleton} from 'moti/skeleton';
 import * as IntentLauncher from 'expo-intent-launcher';
 import RNReactNativeHapticFeedback from 'react-native-haptic-feedback';
-import * as RNFS from '@dr.pogodin/react-native-fs';
-
-// --- NEW IMPORTS ---
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {LinearGradient} from 'expo-linear-gradient';
 
 import {EpisodeLink, Link} from '../lib/providers/types';
@@ -72,7 +67,7 @@ interface StickyMenuState {
 }
 
 // ============================================================================
-// --- CUSTOM EPISODE ROW COMPONENT WITH PROGRESS BUTTON ---
+// --- CUSTOM EPISODE ROW COMPONENT (OPTIMIZED) ---
 // ============================================================================
 const EpisodeRow = React.memo(
   ({
@@ -90,60 +85,9 @@ const EpisodeRow = React.memo(
     primary,
     episodesData,
   }: any) => {
-    const [progress, setProgress] = useState(0);
-    const [isDownloading, setIsDownloading] = useState(false);
-    const fileName = (
-      metaTitle +
-      (activeSeason?.title || '') +
-      item.title
-    ).replaceAll(/[^a-zA-Z0-9]/g, '_');
-
-    // Fetch dynamic real-time progress for this specific episode
     const watchData = getWatchProgressData(item.link);
 
-    useEffect(() => {
-      let interval: NodeJS.Timeout;
-      const checkStatus = async () => {
-        try {
-          const taskData = await AsyncStorage.getItem(`download_${fileName}`);
-          if (taskData) {
-            const task = JSON.parse(taskData);
-            if (task.totalBytes > 0) {
-              let currentBytes = task.downloadedBytes || 0;
-              try {
-                if (task.path) {
-                  const stat = await RNFS.stat(task.path);
-                  if (stat && stat.size > currentBytes) {
-                    currentBytes = stat.size;
-                  }
-                }
-              } catch (e) {}
-
-              const pct = (currentBytes / task.totalBytes) * 100;
-
-              if (pct >= 100) {
-                setIsDownloading(false);
-                setProgress(100);
-                AsyncStorage.removeItem(`download_${fileName}`);
-              } else {
-                setProgress(pct);
-                setIsDownloading(true);
-              }
-            } else {
-              setIsDownloading(true);
-              setProgress(0);
-            }
-          } else {
-            setIsDownloading(false);
-            setProgress(0);
-          }
-        } catch (error) {}
-      };
-
-      interval = setInterval(checkStatus, 1000);
-      checkStatus();
-      return () => clearInterval(interval);
-    }, [fileName]);
+    // --- No more download progress polling – faster touch response ---
 
     return (
       <View
@@ -151,15 +95,18 @@ const EpisodeRow = React.memo(
           watchData.isCompleted || stickyMenu.link === item.link
             ? 'opacity-60'
             : watchData.inProgress
-              ? 'opacity-80' // Darkens row slightly if currently watching
+              ? 'opacity-80'
               : ''
         }`}>
         <View className="flex-row w-full justify-between gap-2 items-center">
           <TouchableOpacity
+            delayPressIn={0}
+            activeOpacity={0.65}
+            delayLongPress={400}
             className={`rounded-md ${
               watchData.isCompleted || watchData.inProgress
-                ? 'bg-white/15' // Subtle dim white for watched/in-progress instead of black
-                : 'bg-white/30' // Normal state
+                ? 'bg-white/15'
+                : 'bg-white/30'
             } w-[80%] min-h-[48px] items-center p-2 flex-row gap-x-2 relative overflow-hidden ${titleAlignment}`}
             onPress={() =>
               playHandler({
@@ -175,7 +122,7 @@ const EpisodeRow = React.memo(
             {/* WATCH PROGRESS GRADIENT (Primary to Green) */}
             {watchData.percentage > 0 && (
               <LinearGradient
-                colors={[primary, '#00C853']} // Theme Primary Color to Green
+                colors={[primary, '#00C853']}
                 start={{x: 0, y: 0}}
                 end={{x: 1, y: 0}}
                 style={{
@@ -184,29 +131,13 @@ const EpisodeRow = React.memo(
                   top: 0,
                   bottom: 0,
                   width: `${watchData.percentage}%`,
-                  opacity: 0.4, // Keep it dim so text stays readable
+                  opacity: 0.4,
                 }}
               />
             )}
 
-            {/* DOWNLOAD PROGRESS GRADIENT */}
-            {isDownloading && (
-              <LinearGradient
-                colors={['#FF416C', '#FF4B2B']}
-                start={{x: 0, y: 0}}
-                end={{x: 1, y: 0}}
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: `${progress}%`,
-                  opacity: 0.85,
-                }}
-              />
-            )}
+            {/* DOWNLOAD PROGRESS removed for performance */}
 
-            {/* Added zIndex: 1 to ensure UI elements stay clearly above gradients */}
             <Ionicons
               name="play-circle"
               size={28}
@@ -235,13 +166,7 @@ const EpisodeRow = React.memo(
               ) : null}
             </View>
 
-            {isDownloading && (
-              <Text
-                className="text-white font-bold pr-2 bg-transparent"
-                style={{fontSize: 12, zIndex: 1}}>
-                {Math.floor(progress)}%
-              </Text>
-            )}
+            {/* Download percentage text removed */}
           </TouchableOpacity>
 
           <Downloader
@@ -253,7 +178,11 @@ const EpisodeRow = React.memo(
                 ? metaTitle.slice(0, 30) + '... ' + item.title
                 : metaTitle + ' ' + item.title
             }
-            fileName={fileName}
+            fileName={(
+              metaTitle +
+              (activeSeason?.title || '') +
+              item.title
+            ).replaceAll(/[^a-zA-Z0-9]/g, '_')}
           />
         </View>
       </View>
@@ -262,7 +191,7 @@ const EpisodeRow = React.memo(
 );
 
 // ============================================================================
-// --- CUSTOM DIRECT LINK ROW COMPONENT WITH PROGRESS BUTTON ---
+// --- CUSTOM DIRECT LINK ROW COMPONENT (OPTIMIZED) ---
 // ============================================================================
 const DirectLinkRow = React.memo(
   ({
@@ -280,60 +209,9 @@ const DirectLinkRow = React.memo(
     primary,
     directLinksData,
   }: any) => {
-    const [progress, setProgress] = useState(0);
-    const [isDownloading, setIsDownloading] = useState(false);
-    const fileName = (
-      metaTitle +
-      (activeSeason?.title || '') +
-      item.title
-    ).replaceAll(/[^a-zA-Z0-9]/g, '_');
-
-    // Fetch dynamic real-time progress for this specific episode
     const watchData = getWatchProgressData(item.link);
 
-    useEffect(() => {
-      let interval: NodeJS.Timeout;
-      const checkStatus = async () => {
-        try {
-          const taskData = await AsyncStorage.getItem(`download_${fileName}`);
-          if (taskData) {
-            const task = JSON.parse(taskData);
-            if (task.totalBytes > 0) {
-              let currentBytes = task.downloadedBytes || 0;
-              try {
-                if (task.path) {
-                  const stat = await RNFS.stat(task.path);
-                  if (stat && stat.size > currentBytes) {
-                    currentBytes = stat.size;
-                  }
-                }
-              } catch (e) {}
-
-              const pct = (currentBytes / task.totalBytes) * 100;
-
-              if (pct >= 100) {
-                setIsDownloading(false);
-                setProgress(100);
-                AsyncStorage.removeItem(`download_${fileName}`);
-              } else {
-                setProgress(pct);
-                setIsDownloading(true);
-              }
-            } else {
-              setIsDownloading(true);
-              setProgress(0);
-            }
-          } else {
-            setIsDownloading(false);
-            setProgress(0);
-          }
-        } catch (error) {}
-      };
-
-      interval = setInterval(checkStatus, 1000);
-      checkStatus();
-      return () => clearInterval(interval);
-    }, [fileName]);
+    // --- No more download progress polling – faster touch response ---
 
     return (
       <View
@@ -346,10 +224,13 @@ const DirectLinkRow = React.memo(
         }`}>
         <View className="flex-row w-full justify-between gap-2 items-center">
           <TouchableOpacity
+            delayPressIn={0}
+            activeOpacity={0.65}
+            delayLongPress={400}
             className={`rounded-md ${
               watchData.isCompleted || watchData.inProgress
-                ? 'bg-white/15' // Subtle dim white for watched/in-progress instead of black
-                : 'bg-white/30' // Normal state
+                ? 'bg-white/15'
+                : 'bg-white/30'
             } w-[80%] min-h-[48px] items-center p-2 flex-row gap-x-2 relative overflow-hidden ${titleAlignment}`}
             onPress={() =>
               playHandler({
@@ -367,7 +248,7 @@ const DirectLinkRow = React.memo(
             {/* WATCH PROGRESS GRADIENT (Primary to Green) */}
             {watchData.percentage > 0 && (
               <LinearGradient
-                colors={[primary, '#00C853']} // Theme Primary Color to Green
+                colors={[primary, '#00C853']}
                 start={{x: 0, y: 0}}
                 end={{x: 1, y: 0}}
                 style={{
@@ -376,29 +257,13 @@ const DirectLinkRow = React.memo(
                   top: 0,
                   bottom: 0,
                   width: `${watchData.percentage}%`,
-                  opacity: 0.4, // Keep it dim so text stays readable
+                  opacity: 0.4,
                 }}
               />
             )}
 
-            {/* DOWNLOAD PROGRESS GRADIENT */}
-            {isDownloading && (
-              <LinearGradient
-                colors={['#FF416C', '#FF4B2B']}
-                start={{x: 0, y: 0}}
-                end={{x: 1, y: 0}}
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: `${progress}%`,
-                  opacity: 0.85,
-                }}
-              />
-            )}
+            {/* DOWNLOAD PROGRESS removed for performance */}
 
-            {/* Added zIndex: 1 to ensure UI elements stay clearly above gradients */}
             <Ionicons
               name="play-circle"
               size={28}
@@ -430,13 +295,7 @@ const DirectLinkRow = React.memo(
               ) : null}
             </View>
 
-            {isDownloading && (
-              <Text
-                className="text-white font-bold pr-2 bg-transparent"
-                style={{fontSize: 12, zIndex: 1}}>
-                {Math.floor(progress)}%
-              </Text>
-            )}
+            {/* Download percentage text removed */}
           </TouchableOpacity>
 
           <Downloader
@@ -448,17 +307,21 @@ const DirectLinkRow = React.memo(
                 ? metaTitle.slice(0, 30) + '... ' + item.title
                 : metaTitle + ' ' + item.title
             }
-            fileName={fileName}
+            fileName={(
+              metaTitle +
+              (activeSeason?.title || '') +
+              item.title
+            ).replaceAll(/[^a-zA-Z0-9]/g, '_')}
           />
         </View>
       </View>
     );
   },
 );
+
 // ============================================================================
 // --- MAIN SEASON LIST COMPONENT ---
 // ============================================================================
-
 const SeasonList: React.FC<SeasonListProps> = ({
   LinkList,
   poster,
@@ -584,7 +447,6 @@ const SeasonList: React.FC<SeasonListProps> = ({
     return hasLongTitles ? 'justify-start' : 'justify-center';
   }, [filteredAndSortedEpisodes, filteredAndSortedDirectLinks]);
 
-  // NEW METHOD: Fetches dynamic formatted progress data
   const getWatchProgressData = useCallback((link: string) => {
     try {
       const watchProgress = JSON.parse(cacheStorage.getString(link) || '{}');
@@ -593,7 +455,6 @@ const SeasonList: React.FC<SeasonListProps> = ({
           (watchProgress.position / watchProgress.duration) * 100;
         let text = '';
 
-        // Manual override for watched
         if (watchProgress.duration === 1 && watchProgress.position >= 1) {
           return {
             isCompleted: true,
@@ -603,7 +464,6 @@ const SeasonList: React.FC<SeasonListProps> = ({
           };
         }
 
-        // Watched automatically
         if (percentage >= 85) {
           return {
             isCompleted: true,
@@ -613,11 +473,10 @@ const SeasonList: React.FC<SeasonListProps> = ({
           };
         }
 
-        // Currently watching
         if (percentage > 0) {
           const format = (val: number) => {
             let sec = val;
-            if (watchProgress.duration > 20000) sec = Math.floor(val / 1000); // converting ms to s
+            if (watchProgress.duration > 20000) sec = Math.floor(val / 1000);
             const h = Math.floor(sec / 3600);
             const m = Math.floor((sec % 3600) / 60);
             const s = Math.floor(sec % 60);
@@ -687,6 +546,16 @@ const SeasonList: React.FC<SeasonListProps> = ({
     }
   }, []);
 
+  // --- Stable playHandler using useRefs for values that shouldn't cause re-creation ---
+  const metaTitleRef = useRef(metaTitle);
+  metaTitleRef.current = metaTitle;
+  const routeParamsRef = useRef(routeParams);
+  routeParamsRef.current = routeParams;
+  const posterRef = useRef(poster);
+  posterRef.current = poster;
+  const providerValueRef = useRef(providerValue);
+  providerValueRef.current = providerValue;
+
   const playHandler = useCallback(
     async ({
       linkIndex,
@@ -697,11 +566,11 @@ const SeasonList: React.FC<SeasonListProps> = ({
       episodeData,
     }: PlayHandlerProps) => {
       addItem({
-        id: routeParams.link,
-        link: routeParams.link,
+        id: routeParamsRef.current.link,
+        link: routeParamsRef.current.link,
         title: primaryTitle,
-        poster: poster?.poster,
-        provider: providerValue,
+        poster: posterRef.current?.poster,
+        provider: providerValueRef.current,
         lastPlayed: Date.now(),
         episodeTitle: secondaryTitle,
         playbackRate: 1,
@@ -712,7 +581,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
 
       const link = episodeData[linkIndex].link;
       const file = (
-        metaTitle +
+        metaTitleRef.current +
         seasonTitle +
         episodeData[linkIndex]?.title
       ).replaceAll(/[^a-zA-Z0-9]/g, '_');
@@ -737,21 +606,16 @@ const SeasonList: React.FC<SeasonListProps> = ({
         type: type,
         primaryTitle: primaryTitle,
         secondaryTitle: seasonTitle,
-        providerValue: providerValue,
-        infoUrl: routeParams.link,
-        poster: poster?.poster || routeParams?.poster || undefined,
-        providerName: providerValue,
+        providerValue: providerValueRef.current,
+        infoUrl: routeParamsRef.current.link,
+        poster:
+          posterRef.current?.poster ||
+          routeParamsRef.current?.poster ||
+          undefined,
+        providerName: providerValueRef.current,
       });
     },
-    [
-      addItem,
-      routeParams.link,
-      poster,
-      providerValue,
-      metaTitle,
-      handleExternalPlayer,
-      navigation,
-    ],
+    [addItem, navigation, handleExternalPlayer],
   );
 
   const onLongPressHandler = useCallback(
@@ -794,6 +658,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
     }
   }, [stickyMenu.link, stickyMenu.type, handleExternalPlayer]);
 
+  // --- Render helpers with minimal dependencies ---
   const renderEpisodeItem = useCallback(
     ({item, index}: {item: EpisodeLink; index: number}) => {
       if (!item || !item.link || !item.title) return null;
@@ -817,17 +682,17 @@ const SeasonList: React.FC<SeasonListProps> = ({
       );
     },
     [
-      getWatchProgressData,
-      stickyMenu.link,
-      titleAlignment,
-      playHandler,
-      metaTitle,
       activeSeason,
-      filteredAndSortedEpisodes,
+      metaTitle,
+      type,
+      providerValue,
+      playHandler,
+      getWatchProgressData,
+      stickyMenu,
+      titleAlignment,
       onLongPressHandler,
       primary,
-      providerValue,
-      type,
+      filteredAndSortedEpisodes,
     ],
   );
 
@@ -854,23 +719,25 @@ const SeasonList: React.FC<SeasonListProps> = ({
       );
     },
     [
-      getWatchProgressData,
-      stickyMenu.link,
-      titleAlignment,
-      playHandler,
-      metaTitle,
       activeSeason,
-      filteredAndSortedDirectLinks,
+      metaTitle,
+      type,
+      providerValue,
+      playHandler,
+      getWatchProgressData,
+      stickyMenu,
+      titleAlignment,
       onLongPressHandler,
       primary,
-      providerValue,
-      type,
+      filteredAndSortedDirectLinks,
     ],
   );
 
   const renderServerItem = useCallback(
     (item: any, index: number) => (
       <TouchableOpacity
+        delayPressIn={0}
+        activeOpacity={0.65}
         key={`server-${index}-${item.server}`}
         className="bg-black/30 p-3 rounded-lg mb-2 flex-row justify-between items-center"
         style={{borderColor: primary, borderWidth: 1}}
@@ -894,6 +761,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
       <View>
         {LinkList.length > 1 && (
           <Dropdown
+            key={LinkList.length} // force re‑mount when list changes
             selectedTextStyle={{
               color: primary,
               overflow: 'hidden',
@@ -908,8 +776,13 @@ const SeasonList: React.FC<SeasonListProps> = ({
             value={activeSeason}
             data={LinkList}
             style={{
+              width: '98%',
+              alignSelf: 'center',
+              minHeight: 48,
+              marginTop: 5,
+              marginBottom: 5,
               overflow: 'hidden',
-              borderWidth: 1,
+              borderWidth: 2,
               borderColor: '#2f302f',
               paddingHorizontal: 12,
               borderRadius: 8,
@@ -958,6 +831,8 @@ const SeasonList: React.FC<SeasonListProps> = ({
           Failed to load episodes. Please try again.
         </Text>
         <TouchableOpacity
+          delayPressIn={0}
+          activeOpacity={0.65}
           className="mt-2 bg-red-600 p-2 rounded-md"
           onPress={() => refetchEpisodes()}>
           <Text className="text-white text-center">Retry</Text>
@@ -970,6 +845,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
     <View>
       {LinkList.length > 1 ? (
         <Dropdown
+          key={LinkList.length}
           selectedTextStyle={{
             color: primary,
             overflow: 'hidden',
@@ -984,6 +860,11 @@ const SeasonList: React.FC<SeasonListProps> = ({
           value={activeSeason}
           data={LinkList}
           style={{
+            width: '98%',
+            alignSelf: 'center',
+            minHeight: 48,
+            marginTop: 5,
+            marginBottom: 5,
             overflow: 'hidden',
             borderWidth: 1,
             borderColor: '#2f302f',
@@ -1023,6 +904,8 @@ const SeasonList: React.FC<SeasonListProps> = ({
             onChangeText={setSearchText}
           />
           <TouchableOpacity
+            delayPressIn={0}
+            activeOpacity={0.65}
             className="bg-black/30 rounded-md p-2 h-10 w-[15%] flex-row justify-center items-center"
             onPress={toggleSortOrder}>
             <MaterialCommunityIcons
@@ -1043,11 +926,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
             maxToRenderPerBatch={10}
             windowSize={10}
             removeClippedSubviews={true}
-            getItemLayout={(data, index) => ({
-              length: 60,
-              offset: 60 * index,
-              index,
-            })}
+            // getItemLayout removed – dynamic heights no longer cause crashes
           />
         )}
         {filteredAndSortedDirectLinks.length > 0 && (
@@ -1059,16 +938,13 @@ const SeasonList: React.FC<SeasonListProps> = ({
               maxToRenderPerBatch={10}
               windowSize={10}
               removeClippedSubviews={true}
-              getItemLayout={(data, index) => ({
-                length: 68,
-                offset: 68 * index,
-                index,
-              })}
+              // getItemLayout removed
             />
           </View>
         )}
       </View>
 
+      {/* Sticky Menu Modal */}
       <Modal
         animationType="fade"
         visible={stickyMenu.active}
@@ -1080,6 +956,8 @@ const SeasonList: React.FC<SeasonListProps> = ({
           <View className="w-full h-14 bg-quaternary flex-row justify-evenly items-center pt-2">
             {getWatchProgressData(stickyMenu.link || '').isCompleted ? (
               <TouchableOpacity
+                delayPressIn={0}
+                activeOpacity={0.65}
                 className="flex-row justify-center items-center gap-2 p-2"
                 onPress={markAsUnwatched}>
                 <Text className="text-white">Marked as Unwatched</Text>
@@ -1087,6 +965,8 @@ const SeasonList: React.FC<SeasonListProps> = ({
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
+                delayPressIn={0}
+                activeOpacity={0.65}
                 className="flex-row justify-center items-center gap-2 pt-0 pb-2 px-2 bg-tertiary rounded-md"
                 onPress={markAsWatched}>
                 <Text className="text-white">Mark as Watched</Text>
@@ -1094,6 +974,8 @@ const SeasonList: React.FC<SeasonListProps> = ({
               </TouchableOpacity>
             )}
             <TouchableOpacity
+              delayPressIn={0}
+              activeOpacity={0.65}
               className="flex-row justify-center bg-tertiary rounded-md items-center pt-0 pb-2 px-2 gap-2"
               onPress={handleStickyMenuExternalPlayer}>
               <Text className="text-white font-bold text-base">
@@ -1105,6 +987,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
         </Pressable>
       </Modal>
 
+      {/* Server Modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -1118,7 +1001,10 @@ const SeasonList: React.FC<SeasonListProps> = ({
               <Text className="text-white text-xl font-bold">
                 Select Server
               </Text>
-              <TouchableOpacity onPress={() => setShowServerModal(false)}>
+              <TouchableOpacity
+                delayPressIn={0}
+                activeOpacity={0.65}
+                onPress={() => setShowServerModal(false)}>
                 <Ionicons name="close" size={24} color="white" />
               </TouchableOpacity>
             </View>
@@ -1149,6 +1035,7 @@ const SeasonList: React.FC<SeasonListProps> = ({
         </Pressable>
       </Modal>
 
+      {/* VLC Loading Modal */}
       <Modal visible={vlcLoading} transparent={true} animationType="fade">
         <View className="flex-1 bg-black/80 justify-center items-center">
           <Animated.View style={{transform: [{rotate: vlcSpin}]}}>

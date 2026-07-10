@@ -2,7 +2,7 @@
 import 'react-native-url-polyfill/auto';
 import {createClient} from '@supabase/supabase-js';
 
-const SUPABASE_URL = 'https://YOUR_SUPABASE_URL.supabase.co';
+const SUPABASE_URL = 'YOUR SUPABASE URL';
 const SUPABASE_ANON_KEY =
   'YOUR_SUPABASE_ANON_KEY';
 

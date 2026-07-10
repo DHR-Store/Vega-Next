@@ -1,4 +1,6 @@
 import * as RNFS from '@dr.pogodin/react-native-fs';
+// 👈 FIX: Import the legacy API directly to fix the SDK 54+ deprecation crash
+import * as FileSystem from 'expo-file-system/legacy'; 
 import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import { Alert, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,9 +20,11 @@ interface DownloadTask {
   paused: boolean;
   canceled?: boolean;
   type: 'normal' | 'hls';
+  resumeData?: string; // 👈 Stores exact byte state for resuming
 }
 
 const activeDownloads = new Map<number | string, DownloadTask>();
+const activeResumables = new Map<string, FileSystem.DownloadResumable>(); 
 let nextHlsId = 1000;
 
 // 🧠 Persist Download State
@@ -76,8 +80,6 @@ async function showDownloadNotification(task: DownloadTask) {
         { title: 'Cancel', pressAction: { id: `cancel_${task.fileName}` } },
       ],
       onlyAlertOnce: true,
-      
-      // 👇 Keeps the JS thread alive when the app is killed
       asForegroundService: true, 
     },
   });
@@ -106,7 +108,6 @@ export async function handleDownloadAction(type: EventType, detail: any) {
   }
 }
 
-// Keep this for when the app is OPEN
 notifee.onForegroundEvent(async ({ type, detail }) => {
   await handleDownloadAction(type, detail);
 });
@@ -115,12 +116,11 @@ notifee.onForegroundEvent(async ({ type, detail }) => {
 async function togglePauseResume(fileName: string) {
   let task = Array.from(activeDownloads.values()).find(d => d.fileName === fileName);
 
-  // FIX: Recover from AsyncStorage if app was killed and memory wiped
   if (!task) {
     const savedState = await AsyncStorage.getItem(`download_${fileName}`);
     if (savedState) {
       task = JSON.parse(savedState);
-      activeDownloads.set(task.jobId, task); // put back in memory
+      activeDownloads.set(task.jobId, task); 
     }
   }
 
@@ -132,9 +132,9 @@ async function togglePauseResume(fileName: string) {
         videoUrl: task.url,
         path: task.path,
         fileName: task.fileName,
-        setDownloadActive: val => {},
-        setAlreadyDownloaded: val => {},
-        setDownloadId: val => {},
+        setDownloadActive: () => {},
+        setAlreadyDownloaded: () => {},
+        setDownloadId: () => {},
         headers: task.headers,
       });
       task.paused = false;
@@ -143,11 +143,35 @@ async function togglePauseResume(fileName: string) {
       task.paused = true;
     }
   } else {
+    // Normal Downloads (YouTube-like logic via Expo)
     task.paused = !task.paused;
+    let resumable = activeResumables.get(task.fileName);
+
+    if (!resumable) {
+      // FIX: Ensure correct file:// URI format
+      const fileUri = task.path.startsWith('file://') ? task.path : `file://${task.path}`;
+      
+      resumable = FileSystem.createDownloadResumable(
+        task.url,
+        fileUri,
+        { headers: task.headers || {} },
+        (res) => handleProgress(task!, res),
+        task.resumeData
+      );
+      activeResumables.set(task.fileName, resumable);
+    }
+
     if (task.paused) {
-      RNFS.stopDownload(task.jobId as number);
+      try {
+        const pauseResult = await resumable.pauseAsync();
+        task.resumeData = pauseResult.resumeData; // Native byte memory logic saved
+      } catch (e) {
+        console.error('Pause Error:', e);
+      }
     } else {
-      resumeDownload(task);
+      resumable.resumeAsync()
+        .then(res => handleComplete(task!, res))
+        .catch(err => handleError(task!, err));
     }
   }
 
@@ -159,20 +183,21 @@ async function togglePauseResume(fileName: string) {
 async function cancelDownload(fileName: string) {
   let task = Array.from(activeDownloads.values()).find(d => d.fileName === fileName);
 
-  // FIX: Recover from AsyncStorage if app was killed and memory wiped
   if (!task) {
     const savedState = await AsyncStorage.getItem(`download_${fileName}`);
-    if (savedState) {
-      task = JSON.parse(savedState);
-    }
+    if (savedState) task = JSON.parse(savedState);
   }
 
   if (!task) return;
 
   if (task.type === 'hls') {
     cancelHlsDownload(task.jobId);
-  } else if (!task.paused) {
-    RNFS.stopDownload(task.jobId as number);
+  } else {
+    let resumable = activeResumables.get(task.fileName);
+    if (resumable && !task.paused) {
+      try { await resumable.pauseAsync(); } catch (e) {}
+    }
+    activeResumables.delete(task.fileName);
   }
 
   task.canceled = true;
@@ -180,8 +205,6 @@ async function cancelDownload(fileName: string) {
 
   activeDownloads.delete(task.jobId);
   await notifee.cancelNotification(fileName);
-  
-  // FIX: Explicitly shut down the foreground service lock
   await notifee.stopForegroundService();
 
   if (task.path && await RNFS.exists(task.path)) {
@@ -190,55 +213,46 @@ async function cancelDownload(fileName: string) {
     } catch {}
   }
 
-  await removeTaskState(fileName); // permanent remove after cancel
+  await removeTaskState(fileName); 
 }
 
-// 🔁 Resume download (RNFS)
-async function resumeDownload(task: DownloadTask) {
-  if (task.canceled) return; // Prevent auto resume
+// 🚀 Helper: Progress Handler
+async function handleProgress(task: DownloadTask, res: FileSystem.DownloadProgressData) {
+  task.downloadedBytes = res.totalBytesWritten;
+  task.totalBytes = res.totalBytesExpectedToWrite;
+  await saveTaskState(task);
+  showDownloadNotification(task);
+}
 
-  const headers = task.headers || {};
-  if (task.downloadedBytes > 0) {
-    headers['Range'] = `bytes=${task.downloadedBytes}-`;
-  }
+// 🚀 Helper: Completion Handler
+async function handleComplete(task: DownloadTask, res: FileSystem.FileSystemDownloadResult | undefined) {
+  if (!res) return; 
+  
+  activeDownloads.delete(task.jobId);
+  activeResumables.delete(task.fileName);
+  await removeTaskState(task.fileName);
 
-  const ret = RNFS.downloadFile({
-    fromUrl: task.url,
-    toFile: task.path,
-    headers,
-    background: true,
-    progressInterval: 1000,
-    begin: res => {
-      task.jobId = res.jobId;
-      activeDownloads.set(res.jobId, task);
-    },
-    progress: async res => {
-      task.downloadedBytes = res.bytesWritten;
-      task.totalBytes = res.contentLength;
-      await saveTaskState(task);
-      showDownloadNotification(task);
-    },
+  notifee.displayNotification({
+    id: `complete_${task.fileName}`,
+    title: 'Download Complete',
+    body: task.fileName,
+    android: { channelId: 'download', smallIcon: 'ic_notification', color: '#00C853' },
   });
+}
 
-  ret.promise.then(async () => {
-    activeDownloads.delete(task.jobId);
-    await removeTaskState(task.fileName);
-
-    notifee.displayNotification({
-      id: `complete_${task.fileName}`,
-      title: 'Download Complete',
-      body: task.fileName,
-      android: { channelId: 'download', smallIcon: 'ic_notification', color: '#00C853' },
-    });
-  }).catch(async err => {
-    activeDownloads.delete(task.jobId);
-    await saveTaskState(task);
-    notifee.displayNotification({
-      id: `failed_${task.fileName}`,
-      title: 'Download Failed',
-      body: task.fileName,
-      android: { channelId: 'download', smallIcon: 'ic_notification', color: '#D50000' },
-    });
+// 🚀 Helper: Error Handler
+async function handleError(task: DownloadTask, err: any) {
+  if (task.canceled) return;
+  activeDownloads.delete(task.jobId);
+  activeResumables.delete(task.fileName);
+  await saveTaskState(task);
+  
+  Alert.alert('Download failed', err.message || 'Failed to download');
+  notifee.displayNotification({
+    id: `failed_${task.fileName}`,
+    title: 'Download Failed',
+    body: task.fileName,
+    android: { channelId: 'download', smallIcon: 'ic_notification', color: '#D50000' },
   });
 }
 
@@ -277,8 +291,12 @@ export async function downloadManager({
     return;
   }
 
+  // 👇 Start loading here
   setDownloadActive(true);
-  if (!(await RNFS.exists(downloadFolder))) await RNFS.mkdir(downloadFolder);
+  
+  if (!(await RNFS.exists(downloadFolder))) {
+    await RNFS.mkdir(downloadFolder);
+  }
 
   const downloadPath = `${downloadFolder}/${fileName}.${fileType}`;
 
@@ -301,7 +319,7 @@ export async function downloadManager({
   }
 
   const task: DownloadTask = {
-    jobId: 0,
+    jobId: Date.now(), 
     fileName,
     url,
     path: downloadPath,
@@ -312,53 +330,31 @@ export async function downloadManager({
     type: 'normal',
     headers,
   };
-  setDownloadId(0);
+  
+  setDownloadId(task.jobId as number);
+  activeDownloads.set(task.jobId, task);
+
+  // FIX: Properly format string so FileSystem API doesn't crash on Android
+  const fileUri = downloadPath.startsWith('file://') ? downloadPath : `file://${downloadPath}`;
+
+  const resumable = FileSystem.createDownloadResumable(
+    url,
+    fileUri,
+    { headers: headers || {} },
+    (res) => handleProgress(task, res)
+  );
+
+  activeResumables.set(fileName, resumable);
   await saveTaskState(task);
+  showDownloadNotification(task);
 
-  const ret = RNFS.downloadFile({
-    fromUrl: url,
-    toFile: downloadPath,
-    headers: headers || {},
-    background: true,
-    progressInterval: 1000,
-    begin: res => {
-      task.jobId = res.jobId;
-      activeDownloads.set(res.jobId, task);
-      showDownloadNotification(task);
-    },
-    progress: async res => {
-      task.downloadedBytes = res.bytesWritten;
-      task.totalBytes = res.contentLength;
-      await saveTaskState(task);
-      showDownloadNotification(task);
-    },
-  });
-
-  ret.promise.then(async () => {
-    activeDownloads.delete(task.jobId);
-    setAlreadyDownloaded(true);
-    setDownloadActive(false);
-    await removeTaskState(task.fileName);
-    notifee.displayNotification({
-      id: `complete_${fileName}`,
-      title: 'Download Complete',
-      body: fileName,
-      android: { channelId: 'download', smallIcon: 'ic_notification', color: '#00C853' },
+  // Trigger download asynchronously
+  resumable.downloadAsync()
+    .then(res => handleComplete(task, res))
+    .catch(err => {
+      setDownloadActive(false); // Stop loading indicator if it fails instantly
+      handleError(task, err);
     });
-  }).catch(async err => {
-    activeDownloads.delete(task.jobId);
-    task.canceled = true;
-    await saveTaskState(task);
-    setAlreadyDownloaded(false);
-    setDownloadActive(false);
-    Alert.alert('Download failed', err.message || 'Failed to download');
-    notifee.displayNotification({
-      id: `failed_${fileName}`,
-      title: 'Download Failed',
-      body: fileName,
-      android: { channelId: 'download', smallIcon: 'ic_notification', color: '#D50000' },
-    });
-  });
 
-  return ret.jobId;
+  return task.jobId;
 }

@@ -28,12 +28,10 @@ android {
         applicationId 'com.vega.next'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 155
-        versionName "3.5.6"
+        versionCode 159
+        versionName "3.6.1"
 
-        ndk {
-            abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
-        }
+        // ✅ ADDED: Required to prevent 64k method limit crashes with heavy libraries like Firebase and simple-torrent
 
         manifestPlaceholders = [
             onesignal_app_id               : "fc34c762-8fbb-45c8-aeb6-b04afbe7c930",
@@ -46,7 +44,8 @@ android {
             enable true
             reset()
             include 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
-            universalApk true
+            // ✅ CHANGED: Set to false so you don't generate massive APKs that bundle all architectures at once
+            universalApk true 
         }
     }
 
@@ -120,6 +119,8 @@ android {
         }
         pickFirst '**/libc++_shared.so'
         pickFirst '**/libfbjni.so'
+        // ✅ ADDED: Resolves native duplicate file errors for the BitTorrent C++ engine
+        pickFirst '**/libjlibtorrent.so' 
     }
 
     bundle {

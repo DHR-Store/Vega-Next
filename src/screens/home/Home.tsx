@@ -3,10 +3,9 @@ import {
   RefreshControl,
   View,
   Text,
-  FlatList,
   NativeSyntheticEvent,
   NativeScrollEvent,
-  Platform,
+  StyleSheet,
 } from 'react-native';
 import Slider from '../../components/Slider';
 import React, {useCallback, useMemo, useRef, useState} from 'react';
@@ -29,6 +28,7 @@ import {providerManager} from '../../lib/services/ProviderManager';
 import Tutorial from '../../components/Touturial';
 import {QueryErrorBoundary} from '../../components/ErrorBoundary';
 import {StatusBar} from 'expo-status-bar';
+import {FlashList} from '@shopify/flash-list'; // Replaced FlatList with FlashList
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'Home'>;
 
@@ -37,11 +37,8 @@ const Home = ({}: Props) => {
   const [backgroundColor, setBackgroundColor] = useState('transparent');
   const drawer = useRef<DrawerLayout>(null);
 
-  // Note: If you need to track drawer state, you should add onDrawerOpen/Close handlers
-  // For now, keeping as is from original code
   const [isDrawerOpen] = useState(false);
 
-  // Memoize static values
   const disableDrawer = useMemo(
     () => mainStorage.getBool('disableDrawer') || false,
     [],
@@ -50,7 +47,6 @@ const Home = ({}: Props) => {
   const {provider, installedProviders} = useContentStore(state => state);
   const {setHero} = useHeroStore(state => state);
 
-  // React Query for home page data
   const {
     data: homeData = [],
     isLoading,
@@ -62,14 +58,11 @@ const Home = ({}: Props) => {
     enabled: !!(installedProviders?.length && provider?.value),
   });
 
-  // Optimized Scroll Handler: Only updates state when absolutely necessary
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const scrollY = event.nativeEvent.contentOffset.y;
-      // Add a small threshold (10) to prevent flickering at the very top
       const newBackgroundColor = scrollY > 10 ? 'black' : 'transparent';
 
-      // Prevent unnecessary re-renders by checking previous state
       if (backgroundColor !== newBackgroundColor) {
         setBackgroundColor(newBackgroundColor);
       }
@@ -77,7 +70,6 @@ const Home = ({}: Props) => {
     [backgroundColor],
   );
 
-  // Stable hero post calculation
   const heroPost = useMemo(() => {
     if (!homeData || homeData.length === 0) {
       return null;
@@ -85,7 +77,6 @@ const Home = ({}: Props) => {
     return getRandomHeroPost(homeData);
   }, [homeData]);
 
-  // Update hero only when hero post actually changes
   React.useEffect(() => {
     if (heroPost) {
       setHero(heroPost);
@@ -102,23 +93,18 @@ const Home = ({}: Props) => {
     }
   }, [refetch]);
 
-  // DATA PREPARATION FOR FLATLIST
-
-  // 1. Prepare Skeleton Data
   const skeletonData = useMemo(() => {
     if (!provider?.value) return [];
     return providerManager.getCatalog({providerValue: provider.value});
   }, [provider?.value]);
 
-  // 2. Determine Active Data Source
   const listData = useMemo(() => {
     if (isLoading) return skeletonData;
     return homeData;
   }, [isLoading, skeletonData, homeData]);
 
-  // 3. Render Item for FlatList (Optimized)
   const renderItem = useCallback(
-    ({item, index}: {item: any; index: number}) => {
+    ({item}: {item: any}) => {
       return (
         <Slider
           isLoading={isLoading}
@@ -131,19 +117,16 @@ const Home = ({}: Props) => {
     [isLoading],
   );
 
-  // 4. Header Component (Hero + ContinueWatching)
   const ListHeader = useMemo(() => {
     return (
       <View>
         <HeroOptimized drawerRef={drawer} isDrawerOpen={isDrawerOpen} />
         <ContinueWatching />
-        {/* Margin fix for the first slider */}
         <View className="-mt-6 relative z-20" />
       </View>
     );
-  }, [isDrawerOpen]); // Add dependencies if HeroOptimized props change
+  }, [isDrawerOpen]);
 
-  // 5. Footer Component (Error Message / Spacing)
   const ListFooter = useMemo(() => {
     if (error) {
       return (
@@ -160,7 +143,6 @@ const Home = ({}: Props) => {
     return <View className="h-16" />;
   }, [error]);
 
-  // Early return for no providers
   if (
     !installedProviders ||
     installedProviders.length === 0 ||
@@ -171,48 +153,43 @@ const Home = ({}: Props) => {
 
   return (
     <QueryErrorBoundary>
-      <GestureHandlerRootView style={{flex: 1}}>
-        <SafeAreaView className="bg-black flex-1">
-          <DrawerLayout
-            drawerPosition="left"
-            drawerWidth={200}
-            drawerLockMode={disableDrawer ? 'locked-closed' : 'unlocked'}
-            drawerType="front"
-            edgeWidth={70}
-            // Removing useNativeAnimations={false} usually helps performance on supported versions,
-            // or defaults to correct behavior for the platform.
-            ref={drawer}
-            drawerBackgroundColor="transparent"
-            renderNavigationView={() =>
-              !disableDrawer && <ProviderDrawer drawerRef={drawer} />
-            }>
-            <StatusBar
-              style="light"
-              animated={true}
-              translucent={true}
-              backgroundColor={backgroundColor}
-            />
+      {/* Extracted inline style to prevent object recreation on render */}
+      <SafeAreaView className="bg-black flex-1">
+        <DrawerLayout
+          drawerPosition="left"
+          drawerWidth={200}
+          drawerLockMode={disableDrawer ? 'locked-closed' : 'unlocked'}
+          drawerType="front"
+          edgeWidth={70}
+          ref={drawer}
+          drawerBackgroundColor="transparent"
+          renderNavigationView={() =>
+            !disableDrawer && <ProviderDrawer drawerRef={drawer} />
+          }>
+          <StatusBar
+            style="light"
+            animated={true}
+            translucent={true}
+            backgroundColor={backgroundColor}
+          />
 
-            <FlatList
+          {/* FlashList requires a View with a bounded size (flex: 1) to render properly */}
+          <View style={styles.flex1} className="bg-black">
+            <FlashList
               data={listData}
               renderItem={renderItem}
               keyExtractor={(item, index) =>
                 `${item.filter || 'section'}-${index}`
               }
-              // Performance Props for Android
-              removeClippedSubviews={true} // Unmounts off-screen views (Crucial for Android)
-              maxToRenderPerBatch={5} // Reduces JS load per frame
-              windowSize={5} // Reduces memory usage
-              initialNumToRender={3} // Speeds up initial load
-              // Header & Footer
+              // FlashList strictly requires an estimatedItemSize for fast layouts
+              // 250 is roughly the height of a title + horizontal poster slider
+              estimatedItemSize={250}
               ListHeaderComponent={ListHeader}
               ListFooterComponent={ListFooter}
-              // Styles & scroll behavior
-              className="bg-black"
               onScroll={handleScroll}
               scrollEventThrottle={16}
               showsVerticalScrollIndicator={false}
-              overScrollMode="never" // Removes Android glow effect for cleaner look
+              overScrollMode="never"
               refreshControl={
                 <RefreshControl
                   colors={[primary]}
@@ -223,11 +200,18 @@ const Home = ({}: Props) => {
                 />
               }
             />
-          </DrawerLayout>
-        </SafeAreaView>
-      </GestureHandlerRootView>
+          </View>
+        </DrawerLayout>
+      </SafeAreaView>
     </QueryErrorBoundary>
   );
 };
+
+// Moving static styles out of the component scope
+const styles = StyleSheet.create({
+  flex1: {
+    flex: 1,
+  },
+});
 
 export default React.memo(Home);

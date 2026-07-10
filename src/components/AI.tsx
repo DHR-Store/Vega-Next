@@ -25,6 +25,15 @@ import {
 import {MaterialCommunityIcons, Feather, Ionicons} from '@expo/vector-icons';
 import useThemeStore from '../lib/zustand/themeStore';
 import {MMKV} from '../lib/Mmkv';
+// Shared AI + TMDB config — also used by components/HeroSuggestionSlider.tsx
+// on the Search screen, so both features stay on the same API key & model.
+import {
+  GROQ_API_KEY,
+  GROQ_ENDPOINT,
+  GROQ_MODEL,
+  TMDB_API_KEY,
+  TMDB_BASE_URL,
+} from '../lib/config/aiConfig';
 
 if (
   Platform.OS === 'android' &&
@@ -32,11 +41,6 @@ if (
 ) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
-
-// --- API KEYS ---
-// WARNING: NEVER HARDCODE SECURE KEYS IN PRODUCTION. This is for example/internal use only.
-const GROQ_API_KEY = 'YOUR_GROQ_API';
-const TMDB_API_KEY = 'YOUR_TMDB_API';
 
 const {width: SCREEN_WIDTH, height: SCREEN_HEIGHT} = Dimensions.get('window');
 
@@ -456,7 +460,7 @@ Only answer entertainment-related queries.`,
   const searchTMDB = async (query: string) => {
     try {
       const response = await fetch(
-        `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(
+        `${TMDB_BASE_URL}/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(
           query,
         )}`,
       );
@@ -547,25 +551,22 @@ Only answer entertainment-related queries.`,
 
       const apiPayload = cleanMessagesForAPI(updatedMessages);
 
-      // Groq recommended model for reliable tool calling
-      const modelToUse = 'llama-3.3-70b-versatile';
+      // Shared Groq model — kept in sync with the Search page's hero slider
+      const modelToUse = GROQ_MODEL;
 
-      const initialGroqResponse = await fetch(
-        'https://api.groq.com/openai/v1/chat/completions',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${GROQ_API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: modelToUse,
-            messages: apiPayload,
-            tools: tools,
-            tool_choice: 'auto',
-          }),
+      const initialGroqResponse = await fetch(GROQ_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${GROQ_API_KEY}`,
         },
-      );
+        body: JSON.stringify({
+          model: modelToUse,
+          messages: apiPayload,
+          tools: tools,
+          tool_choice: 'auto',
+        }),
+      });
 
       const initialData = await initialGroqResponse.json();
 
@@ -614,22 +615,19 @@ Only answer entertainment-related queries.`,
         }
 
         // FIX: The second request MUST also include the tools definition!
-        const secondGroqResponse = await fetch(
-          'https://api.groq.com/openai/v1/chat/completions',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${GROQ_API_KEY}`,
-            },
-            body: JSON.stringify({
-              model: modelToUse,
-              messages: cleanMessagesForAPI(finalMessages),
-              tools: tools, // Fixed missing tool array
-              tool_choice: 'auto', // Keep auto
-            }),
+        const secondGroqResponse = await fetch(GROQ_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${GROQ_API_KEY}`,
           },
-        );
+          body: JSON.stringify({
+            model: modelToUse,
+            messages: cleanMessagesForAPI(finalMessages),
+            tools: tools, // Fixed missing tool array
+            tool_choice: 'auto', // Keep auto
+          }),
+        });
 
         const finalData = await secondGroqResponse.json();
 

@@ -430,10 +430,13 @@ const About = () => {
       });
 
     return () => {
-      Notifications.removeNotificationSubscription(
-        notificationListener.current,
-      );
-      Notifications.removeNotificationSubscription(responseListener.current);
+      // ✅ FIX APPLIED HERE: Call .remove() directly on the subscription references
+      if (notificationListener.current) {
+        notificationListener.current.remove();
+      }
+      if (responseListener.current) {
+        responseListener.current.remove();
+      }
     };
   }, [isForeground]);
 

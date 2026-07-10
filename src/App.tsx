@@ -1,8 +1,7 @@
 // App.tsx
 import 'react-native-gesture-handler'; // MUST BE AT THE VERY TOP
 import 'react-native-reanimated';
-import React, {useEffect, useState, useCallback} from 'react';
-// Updated OneSignal import for Expo 54+
+import React, {useEffect, useState, useCallback, useMemo, useRef} from 'react';
 import {OneSignal, LogLevel} from 'react-native-onesignal';
 import {check, request, PERMISSIONS, RESULTS} from 'react-native-permissions';
 import {
@@ -15,8 +14,8 @@ import {
   Platform,
   DeviceEventEmitter,
   useWindowDimensions,
-  Image as RNImage,
   AppState,
+  InteractionManager,
 } from 'react-native';
 import {MaterialIcons} from '@expo/vector-icons';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
@@ -87,10 +86,26 @@ import Login from './screens/Login';
 import {userSession, User} from './lib/services/login';
 import {downloadManager} from './lib/services/DownloadManager';
 import CommunityScreen from './screens/Community';
-import AppLock from './components/AppLock'; // Adjust path if necessary
+import AppLock from './components/AppLock';
+import {CloudflareSolver} from './components/CloudflareSolver';
+import CachedImage from './components/CachedImage';
+import {runThrottledNetworkTask, isNetworkFast} from './lib/utils/networkGate';
 
+// Enable hardware screens and layout freeze mechanisms before mounting
 enableScreens(true);
 enableFreeze(true);
+
+LogBox.ignoreLogs([
+  'You have passed a style to FlashList',
+  'new NativeEventEmitter()',
+]);
+
+try {
+  OneSignal.Debug.setLogLevel(__DEV__ ? LogLevel.Verbose : LogLevel.None);
+  OneSignal.initialize('fc34c762-8fbb-45c8-aeb6-b04afbe7c930');
+} catch (err) {
+  console.error('OneSignal global initialization error:', err);
+}
 
 /* ----------------- Navigation Types ----------------- */
 export type HomeStackParamList = {
@@ -208,26 +223,28 @@ const WatchListStack = createNativeStackNavigator<WatchListStackParamList>();
 const SettingsStack = createNativeStackNavigator<SettingsStackParamList>();
 const WatchHistoryStack =
   createNativeStackNavigator<WatchHistoryStackParamList>();
-const CommunityStack = createNativeStackNavigator();
 const TVRootStack = createNativeStackNavigator<TVRootStackParamList>();
 const VegaTVStack = createNativeStackNavigator<VegaTVStackParamList>();
 
-/* ----------------- Custom TabBarButton ----------------- */
-function CustomTabBarButton(props: any) {
+// --- Haptic feedback default disabled ---
+const isHapticFeedbackEnabled = () => {
+  // Now returns true only if explicitly set to true in MMKV
+  return MMKV.getBool('hapticFeedback') === true;
+};
+
+// --- Ultra-stable CustomTabBarButton (no re-creations) ---
+const CustomTabBarButton = React.memo((props: any) => {
+  const onPressRef = useRef(props.onPress);
+  onPressRef.current = props.onPress;
+
   const handlePress = useCallback(
     (e: any) => {
-      props.onPress?.(e);
-      if (
-        !props?.accessibilityState?.selected &&
-        settingsStorage.isHapticFeedbackEnabled()
-      ) {
-        RNReactNativeHapticFeedback.trigger('effectTick', {
-          enableVibrateFallback: true,
-          ignoreAndroidSystemSettings: false,
-        });
+      if (isHapticFeedbackEnabled()) {
+        RNReactNativeHapticFeedback.trigger('effectTick');
       }
+      onPressRef.current?.(e);
     },
-    [props.onPress, props.accessibilityState?.selected],
+    [], // stable callback
   );
 
   return (
@@ -240,17 +257,101 @@ function CustomTabBarButton(props: any) {
       {props.children}
     </TouchableOpacity>
   );
-}
+});
 
-/* ----------------- Stack screens ----------------- */
+// --- Memoized Tab Icons (pure, no re-renders) ---
+const HomeIcon = React.memo(({focused, color, size}: any) => (
+  <Animated.View style={{transform: [{scale: focused ? 1.05 : 1}]}}>
+    <Ionicons
+      name={focused ? 'home' : 'home-outline'}
+      color={color}
+      size={size}
+    />
+  </Animated.View>
+));
+
+const SearchIcon = React.memo(({focused, color, size}: any) => (
+  <Animated.View style={{transform: [{scale: focused ? 1.05 : 1}]}}>
+    <Ionicons
+      name={focused ? 'search' : 'search-outline'}
+      color={color}
+      size={size}
+    />
+  </Animated.View>
+));
+
+const WatchListIcon = React.memo(({focused, color, size}: any) => (
+  <Animated.View style={{transform: [{scale: focused ? 1.05 : 1}]}}>
+    <Entypo name="folder-video" color={color} size={size} />
+  </Animated.View>
+));
+
+const SettingsIcon = React.memo(
+  ({
+    focused,
+    color,
+    size,
+    currentUser,
+    primary,
+  }: {
+    focused: boolean;
+    color: string;
+    size: number;
+    currentUser: User | null;
+    primary: string;
+  }) => {
+    const customSize = size + 5;
+    const photoUri = currentUser?.photo || userSession.getBestPhotoUri();
+
+    if (photoUri) {
+      return (
+        <Animated.View style={{transform: [{scale: focused ? 1.05 : 1}]}}>
+          <CachedImage
+            uri={photoUri}
+            cacheKey={`avatar_${photoUri}`}
+            style={{
+              width: customSize,
+              height: customSize,
+              borderRadius: size / 2,
+              borderWidth: focused ? 2 : 0,
+              borderColor: focused ? primary : 'transparent',
+            }}
+            fallback={
+              <Ionicons
+                name={focused ? 'settings' : 'settings-outline'}
+                color={color}
+                size={size}
+              />
+            }
+          />
+        </Animated.View>
+      );
+    }
+    return (
+      <Animated.View style={{transform: [{scale: focused ? 1.05 : 1}]}}>
+        <Ionicons
+          name={focused ? 'settings' : 'settings-outline'}
+          color={color}
+          size={size}
+        />
+      </Animated.View>
+    );
+  },
+);
+
+// --- Stack screen options (same for all) ---
+const STACK_SCREEN_OPTIONS = {
+  headerShown: false,
+  animation: 'ios_from_right',
+  animationDuration: 200,
+  contentStyle: {backgroundColor: 'black'},
+  freezeOnBlur: true,
+};
+
+// --- Stack Navigator Components (no changes needed) ---
 function HomeStackScreen() {
   return (
-    <HomeStack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'ios_from_right',
-        animationDuration: 200,
-      }}>
+    <HomeStack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
       <HomeStack.Screen name="Home" component={Home} />
       <HomeStack.Screen name="Info" component={Info} />
       <HomeStack.Screen name="ScrollList" component={ScrollList} />
@@ -262,12 +363,7 @@ function HomeStackScreen() {
 
 function SearchStackScreen() {
   return (
-    <SearchStack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'ios_from_right',
-        animationDuration: 200,
-      }}>
+    <SearchStack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
       <SearchStack.Screen name="Search" component={Search} />
       <SearchStack.Screen name="ScrollList" component={ScrollList} />
       <SearchStack.Screen name="GenreList" component={ScrollList} />
@@ -281,12 +377,7 @@ function SearchStackScreen() {
 
 function WatchListStackScreen() {
   return (
-    <WatchListStack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'ios_from_right',
-        animationDuration: 200,
-      }}>
+    <WatchListStack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
       <WatchListStack.Screen name="WatchList" component={WatchList} />
       <WatchListStack.Screen name="Info" component={Info} />
     </WatchListStack.Navigator>
@@ -295,12 +386,7 @@ function WatchListStackScreen() {
 
 function WatchHistoryStackScreen() {
   return (
-    <WatchHistoryStack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'ios_from_right',
-        animationDuration: 200,
-      }}>
+    <WatchHistoryStack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
       <WatchHistoryStack.Screen name="WatchHistory" component={WatchHistory} />
       <WatchHistoryStack.Screen name="Info" component={Info} />
       <WatchHistoryStack.Screen
@@ -311,27 +397,9 @@ function WatchHistoryStackScreen() {
   );
 }
 
-function CommunityStackScreen() {
-  return (
-    <CommunityStack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'ios_from_right',
-        animationDuration: 200,
-      }}>
-      <CommunityStack.Screen name="CommunityMain" component={CommunityScreen} />
-    </CommunityStack.Navigator>
-  );
-}
-
 function SettingsStackScreen() {
   return (
-    <SettingsStack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'ios_from_right',
-        animationDuration: 200,
-      }}>
+    <SettingsStack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
       <SettingsStack.Screen name="Settings" component={Settings} />
       <SettingsStack.Screen name="About" component={About} />
       <SettingsStack.Screen name="Preferences" component={Preferences} />
@@ -353,13 +421,7 @@ function SettingsStackScreen() {
 
 function VegaTVStackNavigator() {
   return (
-    <VegaTVStack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'ios_from_right',
-        animationDuration: 200,
-        contentStyle: {backgroundColor: 'transparent'},
-      }}>
+    <VegaTVStack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
       <VegaTVStack.Screen name="LiveTVScreen" component={LiveTVScreen} />
       <VegaTVStack.Screen name="TVPlayerScreen" component={TVPlayerScreen} />
       <VegaTVStack.Screen
@@ -370,9 +432,9 @@ function VegaTVStackNavigator() {
   );
 }
 
-/* ----------------- Tab stack ----------------- */
+// --- Tab Stack ---
 function TabStackScreen() {
-  const {primary} = useThemeStore(state => state);
+  const primary = useThemeStore(state => state.primary);
   const {width} = useWindowDimensions();
   const isLargeScreen = width > 768;
   const [showTabBarLabels, setShowTabBarLabels] = useState(
@@ -382,7 +444,6 @@ function TabStackScreen() {
 
   useEffect(() => {
     const updateSession = () => setCurrentUser(userSession.getCurrentUser());
-
     updateSession();
 
     const loginSub = DeviceEventEmitter.addListener(
@@ -412,123 +473,95 @@ function TabStackScreen() {
     };
   }, []);
 
+  const renderTabBarBackground = useCallback(() => <TabBarBackgound />, []);
+  const renderTabBarButton = useCallback(
+    (props: any) => <CustomTabBarButton {...props} />,
+    [],
+  );
+
+  const tabScreenOptions = useMemo(
+    () => ({
+      animation: 'shift' as const,
+      lazy: true,
+      freezeOnBlur: true,
+      tabBarLabelPosition: 'below-icon' as const,
+      tabBarVariant: isLargeScreen ? ('material' as const) : ('uikit' as const),
+      popToTopOnBlur: false,
+      tabBarPosition: isLargeScreen ? ('left' as const) : ('bottom' as const),
+      headerShown: false,
+      tabBarActiveTintColor: primary,
+      tabBarInactiveTintColor: '#dadde3',
+      tabBarShowLabel: showTabBarLabels,
+      sceneContainerStyle: {backgroundColor: 'black'},
+      tabBarStyle: !isLargeScreen
+        ? {
+            position: 'absolute' as const,
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: showTabBarLabels ? 70 : 45,
+            backgroundColor: 'transparent',
+            borderTopWidth: 0,
+            elevation: 0,
+            paddingTop: 5,
+            paddingBottom: showTabBarLabels ? 5 : 0,
+          }
+        : {},
+      tabBarBackground: renderTabBarBackground,
+      tabBarHideOnKeyboard: true,
+      tabBarButton: renderTabBarButton,
+    }),
+    [
+      isLargeScreen,
+      primary,
+      showTabBarLabels,
+      renderTabBarBackground,
+      renderTabBarButton,
+    ],
+  );
+
+  const renderHomeIcon = useCallback(
+    (props: any) => <HomeIcon {...props} />,
+    [],
+  );
+  const renderSearchIcon = useCallback(
+    (props: any) => <SearchIcon {...props} />,
+    [],
+  );
+  const renderWatchListIcon = useCallback(
+    (props: any) => <WatchListIcon {...props} />,
+    [],
+  );
+  const renderSettingsIcon = useCallback(
+    (props: any) => (
+      <SettingsIcon {...props} currentUser={currentUser} primary={primary} />
+    ),
+    [currentUser, primary],
+  );
+
   return (
     <Tab.Navigator
-      detachInactiveScreens={false} // Keep all tabs in memory for smooth switching
-      screenOptions={{
-        animation: 'shift',
-        tabBarLabelPosition: 'below-icon',
-        tabBarVariant: isLargeScreen ? 'material' : 'uikit',
-        popToTopOnBlur: false,
-        tabBarPosition: isLargeScreen ? 'left' : 'bottom',
-        headerShown: false,
-        tabBarActiveTintColor: primary,
-        tabBarInactiveTintColor: '#dadde3',
-        tabBarShowLabel: showTabBarLabels,
-        tabBarStyle: !isLargeScreen
-          ? {
-              position: 'absolute',
-              bottom: 0,
-              left: 0,
-              right: 0,
-              height: showTabBarLabels ? 70 : 45,
-              backgroundColor: 'transparent',
-              borderRadius: 0,
-              overflow: 'visible',
-              elevation: 0,
-              borderTopWidth: 0,
-              paddingHorizontal: 0,
-              paddingTop: 5,
-              paddingBottom: showTabBarLabels ? 5 : 0,
-            }
-          : {},
-        tabBarBackground: () => <TabBarBackgound />,
-        tabBarHideOnKeyboard: true,
-        tabBarButton: CustomTabBarButton,
-      }}>
+      detachInactiveScreens={true}
+      screenOptions={tabScreenOptions}>
       <Tab.Screen
         name="HomeStack"
         component={HomeStackScreen}
-        options={{
-          title: 'Home',
-          tabBarIcon: ({focused, color, size}) => (
-            <Animated.View style={{transform: [{scale: focused ? 1.1 : 1}]}}>
-              {focused ? (
-                <Ionicons name="home" color={color} size={size} />
-              ) : (
-                <Ionicons name="home-outline" color={color} size={size} />
-              )}
-            </Animated.View>
-          ),
-        }}
+        options={{title: 'Home', tabBarIcon: renderHomeIcon}}
       />
       <Tab.Screen
         name="SearchStack"
         component={SearchStackScreen}
-        options={{
-          title: 'Search',
-          tabBarIcon: ({focused, color, size}) => (
-            <Animated.View style={{transform: [{scale: focused ? 1.1 : 1}]}}>
-              {focused ? (
-                <Ionicons name="search" color={color} size={size} />
-              ) : (
-                <Ionicons name="search-outline" color={color} size={size} />
-              )}
-            </Animated.View>
-          ),
-        }}
+        options={{title: 'Search', tabBarIcon: renderSearchIcon}}
       />
       <Tab.Screen
         name="WatchListStack"
         component={WatchListStackScreen}
-        options={{
-          title: 'Watch List',
-          tabBarIcon: ({focused, color, size}) => (
-            <Animated.View style={{transform: [{scale: focused ? 1.1 : 1}]}}>
-              <Entypo name="folder-video" color={color} size={size} />
-            </Animated.View>
-          ),
-        }}
+        options={{title: 'Watch List', tabBarIcon: renderWatchListIcon}}
       />
       <Tab.Screen
         name="SettingsStack"
         component={SettingsStackScreen}
-        options={{
-          title: 'Settings',
-          tabBarIcon: ({focused, color, size}) => {
-            const customSize = size + 5;
-            const photoUri =
-              currentUser?.photo || userSession.getBestPhotoUri();
-
-            if (photoUri) {
-              return (
-                <Animated.View
-                  style={{transform: [{scale: focused ? 1.1 : 1}]}}>
-                  <RNImage
-                    source={{uri: photoUri}}
-                    style={{
-                      width: customSize,
-                      height: customSize,
-                      borderRadius: size / 2,
-                      borderWidth: focused ? 2 : 0,
-                      borderColor: focused ? primary : 'transparent',
-                    }}
-                  />
-                </Animated.View>
-              );
-            }
-
-            return (
-              <Animated.View style={{transform: [{scale: focused ? 1.1 : 1}]}}>
-                {focused ? (
-                  <Ionicons name="settings" color={color} size={size} />
-                ) : (
-                  <Ionicons name="settings-outline" color={color} size={size} />
-                )}
-              </Animated.View>
-            );
-          },
-        }}
+        options={{title: 'Settings', tabBarIcon: renderSettingsIcon}}
       />
     </Tab.Navigator>
   );
@@ -536,115 +569,95 @@ function TabStackScreen() {
 
 function TVRootStackScreen() {
   return (
-    <TVRootStack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'ios_from_right',
-        animationDuration: 200,
-        contentStyle: {backgroundColor: 'transparent'},
-      }}>
+    <TVRootStack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
       <TVRootStack.Screen name="VegaTVStack" component={VegaTVStackNavigator} />
     </TVRootStack.Navigator>
   );
 }
 
-/* ----------------- Notification modal ----------------- */
-const NotificationPromptModal = ({isVisible, onClose, onAllow}: any) => (
-  <Modal
-    animationType="fade"
-    transparent
-    visible={isVisible}
-    onRequestClose={onClose}>
-    <View className="flex-1 justify-center items-center bg-black/50">
-      <View className="bg-[#1A1A1A] rounded-2xl w-80 p-6 items-center">
-        <MaterialIcons name="notifications-active" size={40} color="#6B7280" />
-        <Text className="text-white text-xl font-bold mt-4 text-center">
-          Allow Vega-Next to send you notifications?
-        </Text>
-        <View className="mt-6 w-full">
-          <TouchableOpacity
-            onPress={onAllow}
-            className="bg-[#262626] rounded-xl py-3 px-4 mb-2">
-            <Text className="text-white text-lg text-center font-semibold">
-              Allow
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={onClose}
-            className="bg-transparent rounded-xl py-3 px-4">
-            <Text className="text-gray-400 text-lg text-center font-semibold">
-              Don't allow
-            </Text>
-          </TouchableOpacity>
+// --- Notification Modal ---
+const NotificationPromptModal = React.memo(
+  ({isVisible, onClose, onAllow}: any) => (
+    <Modal
+      animationType="fade"
+      transparent
+      visible={isVisible}
+      onRequestClose={onClose}>
+      <View className="flex-1 justify-center items-center bg-black/50">
+        <View className="bg-[#1A1A1A] rounded-2xl w-80 p-6 items-center">
+          <MaterialIcons
+            name="notifications-active"
+            size={40}
+            color="#6B7280"
+          />
+          <Text className="text-white text-xl font-bold mt-4 text-center">
+            Allow Vega-Next to send you notifications?
+          </Text>
+          <View className="mt-6 w-full">
+            <TouchableOpacity
+              onPress={onAllow}
+              className="bg-[#262626] rounded-xl py-3 px-4 mb-2">
+              <Text className="text-white text-lg text-center font-semibold">
+                Allow
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={onClose}
+              className="bg-transparent rounded-xl py-3 px-4">
+              <Text className="text-gray-400 text-lg text-center font-semibold">
+                Don't allow
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
-    </View>
-  </Modal>
+    </Modal>
+  ),
 );
+
+const GESTURE_ROOT_STYLE = {flex: 1};
+const SAFE_AREA_BG_STYLE = {backgroundColor: 'black'};
+const SAFE_AREA_EDGES = {
+  right: 'off',
+  top: 'off',
+  left: 'off',
+  bottom: 'additive',
+} as const;
+const NAV_THEME_FONTS = {
+  regular: {fontFamily: 'Inter_400Regular', fontWeight: '400' as const},
+  medium: {fontFamily: 'Inter_500Medium', fontWeight: '500' as const},
+  bold: {fontFamily: 'Inter_700Bold', fontWeight: '700' as const},
+  heavy: {fontFamily: 'Inter_800ExtraBold', fontWeight: '800' as const},
+};
 
 /* ----------------- Main App Component ----------------- */
 const App = () => {
-  LogBox.ignoreLogs([
-    'You have passed a style to FlashList',
-    'new NativeEventEmitter()',
-  ]);
-
-  const {primary} = useThemeStore(state => state);
-  const {appMode} = useAppModeStore(state => state);
+  const primary = useThemeStore(state => state.primary);
+  const appMode = useAppModeStore(state => state.appMode);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [isLocked, setIsLocked] = useState(
-    MMKV.getBool('appLockEnabled') || false,
+    () => MMKV.getBool('appLockEnabled') || false,
   );
   const navigationRef = useNavigationContainerRef();
-  const [currentRouteName, setCurrentRouteName] = useState<string>('');
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+
   const [isCommunityOpen, setIsCommunityOpen] = useState(false);
-
-  // Community floating button state
-
   const [showCommunityButton, setShowCommunityButton] = useState(() => {
-    const enabled = MMKV.getBool('community_enabled');
-    const loggedIn = userSession.isLoggedIn();
-    console.log(
-      '[App] Initial community state - enabled:',
-      enabled,
-      'loggedIn:',
-      loggedIn,
-    );
-    return enabled && loggedIn;
+    return MMKV.getBool('community_enabled') && userSession.isLoggedIn();
   });
 
-  const isCommunityScreen = currentRouteName === 'Community';
-  const shouldShowButton =
-    showCommunityButton && userSession.isLoggedIn() && !isCommunityScreen;
-
-  // ✅ ADD COMMUNITY EVENT LISTENERS
   useEffect(() => {
-    console.log('[App] Community listeners registered');
-
     const communitySub = DeviceEventEmitter.addListener(
       'communityToggled',
       (enabled: boolean) => {
-        console.log(
-          '[App] communityToggled event:',
-          enabled,
-          'isLoggedIn:',
-          userSession.isLoggedIn(),
-        );
         setShowCommunityButton(enabled && userSession.isLoggedIn());
       },
     );
-
     const loginSub = DeviceEventEmitter.addListener('userLoggedIn', () => {
-      console.log('[App] userLoggedIn event');
-      setShowCommunityButton(MMKV.getBool('community_enabled') && true);
+      setShowCommunityButton(MMKV.getBool('community_enabled'));
     });
-
     const logoutSub = DeviceEventEmitter.addListener('userLoggedOut', () => {
-      console.log('[App] userLoggedOut event');
       setShowCommunityButton(false);
     });
-
     return () => {
       communitySub.remove();
       loginSub.remove();
@@ -652,35 +665,28 @@ const App = () => {
     };
   }, []);
 
-  SystemUI.setBackgroundColorAsync('black');
-
   useEffect(() => {
-    setIsLoggedIn(userSession.isLoggedIn());
+    SystemUI.setBackgroundColorAsync('black');
   }, []);
 
   useEffect(() => {
-    downloadManager.resetStaleDownloads();
-  }, []);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', nextState => {
-      if (nextState === 'active') {
-        downloadManager.refreshFromStorage();
-      }
+    InteractionManager.runAfterInteractions(() => {
+      downloadManager.resetStaleDownloads();
     });
-    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
-      if (nextAppState === 'active' && MMKV.getBool('appLockEnabled')) {
-        setIsLocked(true);
+      if (nextAppState === 'active') {
+        InteractionManager.runAfterInteractions(() => {
+          downloadManager.refreshFromStorage();
+          if (MMKV.getBool('appLockEnabled')) setIsLocked(true);
+        });
       }
     });
     return () => subscription.remove();
   }, []);
 
-  // 🔴 FIX: Properly request POST_NOTIFICATIONS only on Android 13+
   useEffect(() => {
     const checkNotificationPermission = async () => {
       if (Platform.OS === 'android' && Platform.Version >= 33) {
@@ -689,20 +695,19 @@ const App = () => {
           if (status === RESULTS.DENIED || status === RESULTS.NOT_DETERMINED) {
             setShowNotificationModal(true);
           }
-        } catch (err) {
-          console.error('Permission check failed:', err);
-        }
+        } catch (err) {}
       }
     };
-    checkNotificationPermission();
+    InteractionManager.runAfterInteractions(() => {
+      checkNotificationPermission();
+    });
   }, []);
 
-  const handleAllowNotifications = async () => {
+  const handleAllowNotifications = useCallback(async () => {
     if (Platform.OS === 'android' && Platform.Version >= 33) {
       const result = await request(PERMISSIONS.ANDROID.POST_NOTIFICATIONS);
       if (result === RESULTS.GRANTED) {
         setShowNotificationModal(false);
-        // Force OneSignal to recognize the granted permission
         OneSignal.Notifications.requestPermission(true);
       } else {
         setShowNotificationModal(false);
@@ -710,32 +715,29 @@ const App = () => {
     } else {
       setShowNotificationModal(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     try {
-      OneSignal.Debug.setLogLevel(LogLevel.Verbose);
-      OneSignal.initialize('fc34c762-8fbb-45c8-aeb6-b04afbe7c930');
       OneSignal.Notifications.requestPermission(false);
+      const handleForeground = (event: any) => {
+        if (Platform.OS === 'android') {
+          event.preventDefault();
+          event
+            .getNotification()
+            .display({android: {smallIcon: 'ic_stat_onesignal_default'}});
+        }
+      };
       OneSignal.Notifications.addEventListener(
         'foregroundWillDisplay',
-        event => {
-          if (Platform.OS === 'android') {
-            event.preventDefault();
-            event.getNotification().display({
-              android: {
-                smallIcon: 'ic_stat_onesignal_default',
-              },
-            });
-          }
-        },
+        handleForeground,
       );
-      OneSignal.Notifications.addEventListener('click', event => {
-        console.log('OneSignal notification clicked:', event);
-      });
-    } catch (err) {
-      console.error('OneSignal initialization error:', err);
-    }
+      return () =>
+        OneSignal.Notifications.removeEventListener(
+          'foregroundWillDisplay',
+          handleForeground,
+        );
+    } catch (err) {}
   }, []);
 
   async function actionHandler({
@@ -754,14 +756,12 @@ const App = () => {
       try {
         const files = await RNFS.readDir(downloadFolder);
         const foundFile = files.find(
-          fileItem =>
-            fileItem.name.split('.').slice(0, -1).join('.') ===
+          f =>
+            f.name.split('.').slice(0, -1).join('.') ===
             detail.notification?.data?.fileName,
         );
         if (foundFile) await RNFS.unlink(foundFile.path);
-      } catch (error) {
-        console.log(error);
-      }
+      } catch (error) {}
     }
     if (type === EventType.PRESS && detail.pressAction?.id === 'install') {
       const res = await RNFS.exists(
@@ -770,10 +770,9 @@ const App = () => {
       if (res) {
         const hasPermission = await checkAppInstallPermission();
         if (!hasPermission) await requestAppInstallPermission();
-        const fileUri = `file://${RNFS.DownloadDirectoryPath}/${detail.notification?.data?.name}`;
-        Linking.openURL(fileUri).catch(err =>
-          console.error('Failed to open APK file:', err),
-        );
+        Linking.openURL(
+          `file://${RNFS.DownloadDirectoryPath}/${detail.notification?.data?.name}`,
+        ).catch(() => {});
       }
     }
   }
@@ -786,114 +785,109 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    updateProvidersService.startAutomaticUpdateCheck();
+    InteractionManager.runAfterInteractions(() => {
+      updateProvidersService.startAutomaticUpdateCheck();
+    });
     return () => updateProvidersService.stopAutomaticUpdateCheck();
   }, []);
 
   useEffect(() => {
-    if (settingsStorage.isAutoCheckUpdateEnabled()) {
-      checkForUpdate(() => {}, settingsStorage.isAutoDownloadEnabled(), false);
-    }
+    if (!settingsStorage.isAutoCheckUpdateEnabled()) return;
+    InteractionManager.runAfterInteractions(() => {
+      runThrottledNetworkTask(
+        'auto_update_check',
+        6 * 60 * 60 * 1000,
+        async () => {
+          if (!(await isNetworkFast())) return;
+          checkForUpdate(
+            () => {},
+            settingsStorage.isAutoDownloadEnabled(),
+            false,
+          );
+        },
+      );
+    });
   }, []);
-
-  const generateUUID = () => {
-    const S4 = () =>
-      (((1 + Math.random()) * 0x10000) | 0).toString(16).substring(1);
-    return `${S4()}${S4()}-${S4()}-${S4()}-${S4()}-${S4()}${S4()}${S4()}`;
-  };
-
-  const sendUserPing = async () => {
-    const API_URL = 'http://10.0.2.2:3000/api/user-ping';
-    try {
-      let userId = null;
-      if (Platform.OS === 'android') userId = Application.androidId;
-      else if (Platform.OS === 'ios')
-        userId = await Application.getIosIdForVendorAsync();
-      if (!userId) userId = generateUUID();
-      await fetch(API_URL, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({userId, platform: Platform.OS}),
-      });
-    } catch (error) {
-      console.error('Failed to log user activity:', error);
-    }
-  };
 
   useEffect(() => {
-    sendUserPing();
+    InteractionManager.runAfterInteractions(() => {
+      runThrottledNetworkTask('user_ping', 12 * 60 * 60 * 1000, async () => {
+        if (!(await isNetworkFast())) return;
+        try {
+          let userId =
+            Platform.OS === 'android'
+              ? Application.androidId
+              : await Application.getIosIdForVendorAsync();
+          await fetch('http://10.0.2.2:3000/api/user-ping', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              userId: userId || 'fallback-id',
+              platform: Platform.OS,
+            }),
+          });
+        } catch (error) {}
+      });
+    });
   }, []);
 
-  // Simplified mode selector since Music is removed
-  const MainComponent = appMode === 'tv' ? TVRootStackScreen : TabStackScreen;
+  const MainComponent = useMemo(
+    () => (appMode === 'tv' ? TVRootStackScreen : TabStackScreen),
+    [appMode],
+  );
+  const initialRoute = useMemo<keyof RootStackParamList>(
+    () => (MMKV.getBool('hasSeenOnboarding') ? 'MainStack' : 'Onboarding'),
+    [],
+  );
+  const handleReady = useCallback(async () => {
+    await BootSplash.hide({fade: true});
+  }, []);
 
-  const hasSeenOnboarding = MMKV.getBool('hasSeenOnboarding') === true;
+  const navTheme = useMemo(
+    () => ({
+      fonts: NAV_THEME_FONTS,
+      dark: true,
+      colors: {
+        background: 'black',
+        card: 'black',
+        primary: primary,
+        text: 'white',
+        border: 'black',
+        notification: primary,
+      },
+    }),
+    [primary],
+  );
 
-  let initialRoute: keyof RootStackParamList = hasSeenOnboarding
-    ? 'MainStack'
-    : 'Onboarding';
+  const handleOpenCommunity = useCallback(() => setIsCommunityOpen(true), []);
+  const handleCloseCommunity = useCallback(() => setIsCommunityOpen(false), []);
+  const handleNavigateToHistory = useCallback(() => {
+    if (navigationRef.isReady()) navigationRef.navigate('ChatHistory' as never);
+  }, [navigationRef]);
+  const handleCloseNotificationModal = useCallback(
+    () => setShowNotificationModal(false),
+    [],
+  );
+  const handleUnlock = useCallback(() => setIsLocked(false), []);
 
   return (
-    <GestureHandlerRootView style={{flex: 1}}>
+    <GestureHandlerRootView style={GESTURE_ROOT_STYLE}>
       <GlobalErrorBoundary>
         <SafeAreaProvider>
           <QueryClientProvider client={queryClient}>
             <SafeAreaView
-              edges={{
-                right: 'off',
-                top: 'off',
-                left: 'off',
-                bottom: 'additive',
-              }}
+              edges={SAFE_AREA_EDGES}
               className="flex-1"
-              style={{backgroundColor: 'black'}}>
+              style={SAFE_AREA_BG_STYLE}>
+              <CloudflareSolver />
               <NavigationContainer
                 ref={navigationRef}
-                onReady={async () => {
-                  await BootSplash.hide({fade: true});
-                  setCurrentRouteName(
-                    navigationRef.getCurrentRoute()?.name || '',
-                  );
-                }}
-                onStateChange={() => {
-                  const currentRoute =
-                    navigationRef.getCurrentRoute()?.name || '';
-                  if (currentRouteName !== currentRoute)
-                    setCurrentRouteName(currentRoute);
-                }}
-                theme={{
-                  fonts: {
-                    regular: {
-                      fontFamily: 'Inter_400Regular',
-                      fontWeight: '400',
-                    },
-                    medium: {fontFamily: 'Inter_500Medium', fontWeight: '500'},
-                    bold: {fontFamily: 'Inter_700Bold', fontWeight: '700'},
-                    heavy: {
-                      fontFamily: 'Inter_800ExtraBold',
-                      fontWeight: '800',
-                    },
-                  },
-                  dark: true,
-                  colors: {
-                    background: 'transparent',
-                    card: 'black',
-                    primary: primary,
-                    text: 'white',
-                    border: 'black',
-                    notification: primary,
-                  },
-                }}>
-                {/* Wrap navigator and floating button in a fragment */}
+                onReady={handleReady}
+                theme={navTheme}>
                 <>
                   <Stack.Navigator
                     initialRouteName={initialRoute}
-                    screenOptions={{
-                      headerShown: false,
-                      animation: 'ios_from_right',
-                      animationDuration: 200,
-                      contentStyle: {backgroundColor: 'transparent'},
-                    }}>
+                    screenOptions={STACK_SCREEN_OPTIONS}>
                     <Stack.Screen name="Onboarding" component={Onboarding} />
                     <Stack.Screen name="Login" component={Login} />
                     <Stack.Screen name="MainStack" component={MainComponent} />
@@ -907,34 +901,22 @@ const App = () => {
                     <Stack.Screen name="ChatHistory" component={ChatHistory} />
                   </Stack.Navigator>
 
-                  {/* Floating button now inside NavigationContainer */}
                   <FloatingCommunityButton
-                    visible={shouldShowButton && !isCommunityOpen}
-                    onOpen={() => setIsCommunityOpen(true)}
+                    visible={showCommunityButton && !isCommunityOpen}
+                    onOpen={handleOpenCommunity}
                   />
-                  {/* 🟢 3. RENDER the community chat as a floating widget component */}
                   {isCommunityOpen && (
-                    <CommunityScreen
-                      onClose={() => setIsCommunityOpen(false)}
-                    />
+                    <CommunityScreen onClose={handleCloseCommunity} />
                   )}
                 </>
               </NavigationContainer>
-
-              <AI
-                currentRoute={currentRouteName}
-                onNavigateToHistory={() => {
-                  if (navigationRef.isReady())
-                    navigationRef.navigate('ChatHistory' as never);
-                }}
-              />
-
+              <AI onNavigateToHistory={handleNavigateToHistory} />
               <NotificationPromptModal
                 isVisible={showNotificationModal}
-                onClose={() => setShowNotificationModal(false)}
+                onClose={handleCloseNotificationModal}
                 onAllow={handleAllowNotifications}
               />
-              {isLocked && <AppLock onUnlock={() => setIsLocked(false)} />}
+              {isLocked && <AppLock onUnlock={handleUnlock} />}
             </SafeAreaView>
           </QueryClientProvider>
         </SafeAreaProvider>
@@ -943,4 +925,4 @@ const App = () => {
   );
 };
 
-export default App;
+export default React.memo(App);

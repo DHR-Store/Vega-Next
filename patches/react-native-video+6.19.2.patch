@@ -11,18 +11,58 @@ index 748b799..b4afeae 100644
  
      if (ExoplayerDependencies["useExoplayerSmoothStreaming"]) {
 diff --git a/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ReactExoplayerView.java b/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ReactExoplayerView.java
-index e16ac96..84c7647 100644
+index e16ac96..354fc43 100644
 --- a/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ReactExoplayerView.java
 +++ b/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ReactExoplayerView.java
-@@ -60,6 +60,7 @@ import androidx.media3.datasource.HttpDataSource;
+@@ -18,6 +18,7 @@ import android.content.Context;
+ import android.content.Intent;
+ import android.content.ServiceConnection;
+ import android.media.AudioManager;
++import android.media.audiofx.LoudnessEnhancer;
+ import android.net.Uri;
+ import android.os.Build;
+ import android.os.Handler;
+@@ -60,6 +61,8 @@ import androidx.media3.datasource.HttpDataSource;
  import androidx.media3.exoplayer.DefaultLoadControl;
  import androidx.media3.exoplayer.DefaultRenderersFactory;
  import androidx.media3.exoplayer.ExoPlayer;
++import androidx.media3.exoplayer.analytics.AnalyticsListener;
 +import androidx.media3.exoplayer.RendererCapabilities;
  import androidx.media3.exoplayer.dash.DashMediaSource;
  import androidx.media3.exoplayer.dash.DashUtil;
  import androidx.media3.exoplayer.dash.DefaultDashChunkSource;
-@@ -234,6 +235,7 @@ public class ReactExoplayerView extends FrameLayout implements
+@@ -140,6 +143,7 @@ import com.google.ads.interactivemedia.v3.api.AdEvent;
+ import com.google.ads.interactivemedia.v3.api.ImaSdkFactory;
+ import com.google.ads.interactivemedia.v3.api.ImaSdkSettings;
+ import com.google.common.collect.ImmutableList;
++import android.media.audiofx.LoudnessEnhancer;
+ 
+ import java.net.CookieHandler;
+ import java.net.CookieManager;
+@@ -200,6 +204,7 @@ public class ReactExoplayerView extends FrameLayout implements
+     private EventLogger debugEventLogger = null;
+     private boolean enableDebug = false;
+     private static final String TAG_EVENT_LOGGER = "RNVExoplayer";
++    private LoudnessEnhancer loudnessEnhancer;
+ 
+     private int resumeWindow;
+     private long resumePosition;
+@@ -215,6 +220,14 @@ public class ReactExoplayerView extends FrameLayout implements
+     private float rate = 1f;
+     private AudioOutput audioOutput = AudioOutput.SPEAKER;
+     private float audioVolume = 1f;
++    // VLC-style volume boost: audioVolume can go up to MAX_AUDIO_VOLUME (200%). Anything
++    // above 1.0f cannot be represented by Player.setVolume() (which clamps to [0,1]), so the
++    // extra amount is applied as a post-processing gain via LoudnessEnhancer, which — unlike a
++    // raw signal multiplier — includes its own limiter, so boosted audio stays clear/undistorted
++    // instead of clipping.
++    public static final float MAX_AUDIO_VOLUME = 2.0f;
++    private static final int MAX_LOUDNESS_GAIN_MB = 2000; // 20 dB ceiling at 200% volume
++    private int loudnessEnhancerSessionId = C.AUDIO_SESSION_ID_UNSET;
+     private int maxBitRate = 0;
+     private boolean hasDrmFailed = false;
+     private boolean isUsingContentResolution = false;
+@@ -234,6 +247,7 @@ public class ReactExoplayerView extends FrameLayout implements
      private boolean isSeeking = false;
      private long seekPosition = -1;
      private boolean hasVideoEnded = false;
@@ -30,7 +70,18 @@ index e16ac96..84c7647 100644
  
      // Props from React
      private Source source = new Source();
-@@ -715,6 +717,7 @@ public class ReactExoplayerView extends FrameLayout implements
+@@ -401,6 +415,10 @@ public class ReactExoplayerView extends FrameLayout implements
+         themedReactContext.removeLifecycleEventListener(this);
+         releasePlayer();
+         viewHasDropped = true;
++        // releasePlayer() already releases the LoudnessEnhancer, but this is a safety net
++        // in case cleanUpResources() is ever reached with player == null while an enhancer
++        // instance is still lingering.
++        releaseLoudnessEnhancer();
+     }
+ 
+     //BandwidthMeter.EventListener implementation
+@@ -715,6 +733,7 @@ public class ReactExoplayerView extends FrameLayout implements
      private void initializePlayerCore(ReactExoplayerView self) {
          ExoTrackSelection.Factory videoTrackSelectionFactory = new AdaptiveTrackSelection.Factory();
          self.trackSelector = new DefaultTrackSelector(getContext(), videoTrackSelectionFactory);
@@ -38,7 +89,7 @@ index e16ac96..84c7647 100644
          self.trackSelector.setParameters(trackSelector.buildUponParameters()
                  .setMaxVideoBitrate(maxBitRate == 0 ? Integer.MAX_VALUE : maxBitRate));
  
-@@ -732,7 +735,7 @@ public class ReactExoplayerView extends FrameLayout implements
+@@ -732,7 +751,7 @@ public class ReactExoplayerView extends FrameLayout implements
  
          DefaultRenderersFactory renderersFactory =
                  new DefaultRenderersFactory(getContext())
@@ -47,7 +98,34 @@ index e16ac96..84c7647 100644
                          .setEnableDecoderFallback(true)
                          .forceEnableMediaCodecAsynchronousQueueing();
  
-@@ -1954,6 +1957,12 @@ public class ReactExoplayerView extends FrameLayout implements
+@@ -759,7 +778,17 @@ public class ReactExoplayerView extends FrameLayout implements
+         ReactNativeVideoManager.Companion.getInstance().onInstanceCreated(instanceId, player);
+         refreshDebugState();
+         player.addListener(self);
+-        player.setVolume(muted ? 0.f : audioVolume * 1);
++        player.addAnalyticsListener(new AnalyticsListener() {
++            @Override
++            public void onAudioSessionIdChanged(AnalyticsListener.EventTime eventTime, int audioSessionId) {
++                // The audio session id can change (e.g. on track switch); re-attach the
++                // LoudnessEnhancer whenever that happens so the boost keeps working.
++                if (audioVolume > 1f) {
++                    applyVolumeWithBoost(muted ? 0f : audioVolume);
++                }
++            }
++        });
++        applyVolumeWithBoost(muted ? 0.f : audioVolume);
+         exoPlayerView.setPlayer(player);
+ 
+         audioBecomingNoisyReceiver.setListener(self);
+@@ -1226,6 +1255,7 @@ public class ReactExoplayerView extends FrameLayout implements
+             }
+ 
+             updateResumePosition();
++            releaseLoudnessEnhancer();
+             player.release();
+             player.removeListener(this);
+             PictureInPictureUtil.applyAutoEnterEnabled(themedReactContext, pictureInPictureParamsBuilder, false);
+@@ -1954,6 +1984,12 @@ public class ReactExoplayerView extends FrameLayout implements
      public void onPlayerError(@NonNull PlaybackException e) {
          String errorString = "ExoPlaybackException: " + PlaybackException.getErrorCodeName(e.errorCode);
          String errorCode = "2" + e.errorCode;
@@ -60,7 +138,7 @@ index e16ac96..84c7647 100644
          switch(e.errorCode) {
              case PlaybackException.ERROR_CODE_DRM_DEVICE_REVOKED:
              case PlaybackException.ERROR_CODE_DRM_LICENSE_ACQUISITION_FAILED:
-@@ -2317,6 +2326,15 @@ public class ReactExoplayerView extends FrameLayout implements
+@@ -2317,6 +2353,15 @@ public class ReactExoplayerView extends FrameLayout implements
              groupIndex = getGroupIndexForDefaultLocale(groups);
          }
  
@@ -76,7 +154,7 @@ index e16ac96..84c7647 100644
          if (groupIndex == C.INDEX_UNSET && trackType == C.TRACK_TYPE_VIDEO && groups.length != 0) { // Video auto
              // Add all tracks as valid options for ABR to choose from
              TrackGroup group = groups.get(0);
-@@ -2359,7 +2377,7 @@ public class ReactExoplayerView extends FrameLayout implements
+@@ -2359,7 +2404,7 @@ public class ReactExoplayerView extends FrameLayout implements
              DefaultTrackSelector.Parameters.Builder selectionParameters = trackSelector.getParameters()
                      .buildUpon()
                      .setExceedAudioConstraintsIfNecessary(true)
@@ -85,7 +163,7 @@ index e16ac96..84c7647 100644
                      .setExceedVideoConstraintsIfNecessary(true)
                      .setRendererDisabled(rendererIndex, false);
  
-@@ -2429,6 +2447,209 @@ public class ReactExoplayerView extends FrameLayout implements
+@@ -2429,6 +2474,209 @@ public class ReactExoplayerView extends FrameLayout implements
          return groupIndex;
      }
  
@@ -295,3 +373,95 @@ index e16ac96..84c7647 100644
      public void setSelectedVideoTrack(String type, String value) {
          videoTrackType = type;
          videoTrackValue = value;
+@@ -2546,9 +2794,7 @@ public class ReactExoplayerView extends FrameLayout implements
+ 
+     public void setMutedModifier(boolean muted) {
+         this.muted = muted;
+-        if (player != null) {
+-            player.setVolume(muted ? 0.f : audioVolume);
+-        }
++        applyVolumeWithBoost(muted ? 0f : audioVolume);
+     }
+ 
+     private void changeAudioOutput(AudioOutput output) {
+@@ -2577,10 +2823,77 @@ public class ReactExoplayerView extends FrameLayout implements
+     }
+ 
+     public void setVolumeModifier(float volume) {
+-        audioVolume = volume;
+-        if (player != null) {
+-            player.setVolume(audioVolume);
++        // Clamp to [0, MAX_AUDIO_VOLUME] so a bad JS-side value can't request an
++        // extreme, ear-damaging or crash-prone gain.
++        audioVolume = Math.max(0f, Math.min(MAX_AUDIO_VOLUME, volume));
++        applyVolumeWithBoost(muted ? 0f : audioVolume);
++    }
++
++    /**
++     * Applies {@code targetVolume} to the player, splitting it across two stages:
++     * - 0.0–1.0 is handled natively by {@link ExoPlayer#setVolume(float)}.
++     * - 1.0–{@link #MAX_AUDIO_VOLUME} (100%-200%, VLC-style) is handled by a
++     *   {@link LoudnessEnhancer} attached to the player's audio session, since ExoPlayer's
++     *   own volume control clamps at 1.0. LoudnessEnhancer applies a limiter internally, so
++     *   the boosted output stays clear instead of clipping/distorting like a raw gain would.
++     */
++    private void applyVolumeWithBoost(float targetVolume) {
++        if (player == null) {
++            return;
++        }
++
++        float clampedTarget = Math.max(0f, Math.min(MAX_AUDIO_VOLUME, targetVolume));
++        player.setVolume(Math.min(1f, clampedTarget));
++
++        float boostAmount = clampedTarget - 1f; // > 0 once past 100%
++        if (boostAmount > 0f) {
++            enableLoudnessBoost(boostAmount);
++        } else {
++            disableLoudnessBoost();
++        }
++    }
++
++    private void enableLoudnessBoost(float boostAmount) {
++        int sessionId = player.getAudioSessionId();
++        if (sessionId == C.AUDIO_SESSION_ID_UNSET) {
++            // No audio session yet (e.g. called before playback started); the
++            // AnalyticsListener.onAudioSessionIdChanged callback re-applies the boost once
++            // a session becomes available.
++            return;
++        }
++
++        try {
++            if (loudnessEnhancer == null || loudnessEnhancerSessionId != sessionId) {
++                releaseLoudnessEnhancer();
++                loudnessEnhancer = new LoudnessEnhancer(sessionId);
++                loudnessEnhancerSessionId = sessionId;
++            }
++            int gainMb = (int) (Math.min(boostAmount, MAX_AUDIO_VOLUME - 1f) * MAX_LOUDNESS_GAIN_MB);
++            loudnessEnhancer.setTargetGain(gainMb);
++            loudnessEnhancer.setEnabled(true);
++        } catch (Exception e) {
++            // Some devices/OEMs don't support LoudnessEnhancer; fail safe rather than crash.
++            DebugLog.w(TAG, "Unable to apply volume boost: " + e);
++            releaseLoudnessEnhancer();
++        }
++    }
++
++    private void disableLoudnessBoost() {
++        if (loudnessEnhancer != null) {
++            try {
++                loudnessEnhancer.setEnabled(false);
++            } catch (Exception ignored) {}
++        }
++    }
++
++    private void releaseLoudnessEnhancer() {
++        if (loudnessEnhancer != null) {
++            try {
++                loudnessEnhancer.release();
++            } catch (Exception ignored) {}
++            loudnessEnhancer = null;
+         }
++        loudnessEnhancerSessionId = C.AUDIO_SESSION_ID_UNSET;
+     }
+ 
+     public void seekTo(long positionMs) {

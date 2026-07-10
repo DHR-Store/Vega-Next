@@ -10,6 +10,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import debounce from 'lodash/debounce';
 import {searchOMDB} from '../lib/services/omdb';
 import {OMDBResult} from '../types/omdb';
+import HeroSuggestionSlider from '../components/HerosuggestionSlider';
 
 const MAX_VISIBLE_RESULTS = 15;
 const MAX_HISTORY_ITEMS = 30;
@@ -441,6 +442,12 @@ const Search = () => {
 
   return (
     <SafeAreaView className="flex-1 bg-black">
+      {/* Top auto-sliding AI hero banner — built from watch history, watchlist
+          and search history. Hidden (but kept mounted, so it doesn't refetch)
+          while the user is actively searching. */}
+      <View style={{display: isSearching ? 'none' : 'flex'}}>
+        <HeroSuggestionSlider onSelectTitle={handleSearch} />
+      </View>
       {/* Title Section */}
       <View className="px-4 pt-4">
         <View className="flex-row justify-between items-center mb-3">

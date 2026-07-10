@@ -3,7 +3,7 @@
     "name": "Vega-Next",
     "displayName": "Vega-Next",
     "slug": "vega-next",
-    "version": "3.5.6",
+    "version": "3.6.1",
     "sdkVersion": "54.0.0",
     "newArchEnabled": true,
     "jsEngine": "hermes",
