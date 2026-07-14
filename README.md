@@ -97,6 +97,7 @@ Vega-Next is a modern, open‑source Android application built with React Native
 ### Prerequisites
 
 - Node.js >= 18
+- JDK >= 17
 - React Native development environment ([official guide](https://reactnative.dev/docs/environment-setup))
 - Android Studio (for Android builds)
 - Expo CLI
@@ -108,3 +109,19 @@ Vega-Next is a modern, open‑source Android application built with React Native
 ```bash
 git clone https://github.com/DHR-Store/Vega-Next.git
 cd Vega-Next
+```
+```bash
+npm install
+# or
+yarn install
+```
+Start App Run
+```bash
+npm run android
+# or
+yarn android
+```
+build apk
+```bash
+./gradlew assemblerelease
+```
